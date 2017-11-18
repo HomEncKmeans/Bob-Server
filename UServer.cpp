@@ -68,7 +68,16 @@ void UServer::socketAccept() {
 
 }
 
-void UServer::handleRequest(int) {
+void UServer::handleRequest(int socketFD) {
+    string message = this->receiveMessage(socketFD,4);
+    if(message=="C-PK"){
+        this->receiveEncryptionParamFromClient(socketFD);
+    }else if(message=="C-DATA"){
+
+    }else{
+        perror("ERROR IN PROTOCOL INITIALIZATION");
+        return;
+    }
 
 }
 
@@ -78,21 +87,29 @@ bool UServer::sendStream(ifstream data, int socket){
     data.seekg(0,ios::end);
     end=data.tellg();
     streampos size = end-begin;
-    streampos *sizeref = &size;
-    print(size);
-    auto * memblock = new char [size];
+    uint32_t sizek= size;
+    auto * memblock = new char [sizek];
     data.seekg (0, std::ios::beg);
-    data.read (memblock, size);
+    data.read (memblock, sizek);
     data.close();
-    if(0 > send(socket, sizeref, sizeof(size), 0)){
+    htonl(sizek);
+    if(0 > send(socket, &sizek, sizeof(uint32_t), 0)){
         perror("SEND FAILED.");
         return false;
     }else {
-        if (send(socket, memblock, static_cast<size_t>(size), 0) < 0) {
-            perror("SEND FAILED.");
+        this->log(socket,"<--- "+to_string(sizek));
+        if(this->receiveMessage(socket,7)=="SIZE-OK") {
+            ssize_t r = (send(socket, memblock, static_cast<size_t>(size), 0));
+            print(r); //for debugging
+            if ( r< 0) {
+                perror("SEND FAILED.");
+                return false;
+            } else {
+                return true;
+            }
+        }else{
+            perror("SEND SIZE ERROR");
             return false;
-        } else {
-            return true;
         }
     }
 }
@@ -114,12 +131,31 @@ string UServer::receiveMessage(int socketFD, int buffersize) {
         perror("RECEIVE FAILED");
     }
     message=buffer;
+    message.erase(static_cast<unsigned long>(buffersize));
     this->log(socketFD,"---> "+message);
     return message;
 }
 
-ifstream UServer::receiveStream(int) {
-    return std::ifstream();
+ifstream UServer::receiveStream(int socketFD) {
+    uint32_t size;
+    auto *data = (char*)&size;
+    if(recv(socketFD,data,sizeof(uint32_t),0)<0){
+        perror("RECEIVE SIZE ERROR");
+    }
+    ntohl(size);
+    this->log(socketFD,"--> SIZE: "+to_string(size));
+    this->sendMessage(socketFD,"SIZE-OK");
+    char buffer[size];
+    ssize_t r= recv(socketFD,buffer,size,0);
+    print(r);
+    if(r<0){
+        perror("RECEIVE STREAM ERROR");
+    }
+    ofstream temp("temp.dat",ios::out|ios::binary);
+    temp.write(buffer,size);
+    temp.close();
+
+    return ifstream("temp.dat");
 }
 
 void UServer::log(int socket, string message){
@@ -134,4 +170,19 @@ void UServer::log(int socket, string message){
     port = addressInternet->sin_port;
     string msg = "["+ip+":"+to_string(port)+"] "+message;
     print(msg);
+}
+
+void UServer::receiveEncryptionParamFromClient( int socketFD) {
+    this->sendMessage(socketFD,"U-PK-READY");
+    this->receiveStream(socketFD);
+    this->sendMessage(socketFD,"U-PK-RECEIVED");
+    string message = this->receiveMessage(socketFD,4);
+    if(message!="C-SM"){
+        perror("ERROR IN PROTOCOL 1-STEP 2");
+        return;
+    }
+    this->sendMessage(socketFD,"U-SM-READY");
+    this->receiveStream(socketFD);
+    this->sendMessage(socketFD,"U-SM-RECEIVED");
+    this->socketAccept();
 }

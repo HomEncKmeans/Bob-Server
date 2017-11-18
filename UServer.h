@@ -24,11 +24,13 @@ private:
     string t_serverIP;
     int t_serverPort;
     int t_serverSocket;
+    int clientSocket;
     void socketCreate();
     void socketBind();
     void socketListen();
     void socketAccept();
     void handleRequest(int);
+    void receiveEncryptionParamFromClient(int);
 
 public:
     UServer(string,int,string,int);
