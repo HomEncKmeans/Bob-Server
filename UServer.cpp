@@ -5,31 +5,48 @@
 #include "UServer.h"
 
 
-
-UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort) {
-    this->u_serverIP= move(u_serverIP);
-    this->u_serverPort=u_serverPort;
-    this->t_serverIP= move(t_serverIP);
-    this->t_serverPort=t_serverPort;
+UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, int k) {
+    this->k=k;
+    this->u_serverIP = move(u_serverIP);
+    this->u_serverPort = u_serverPort;
+    this->t_serverIP = move(t_serverIP);
+    this->t_serverPort = t_serverPort;
     print("UNTRUSTED SERVER");
     this->socketCreate();
     this->socketBind();
     this->socketListen();
     this->socketAccept();
-    this->handleRequest(this->u_serverSocket);
-
+    print("CLIENT ENCRYPTION PARAMETERS");
+    ifstream contextfile("context.dat");
+    FHEcontext fhEcontext(contextfile);
+    this->client_context=&fhEcontext;
+    activeContext=&fhEcontext;
+    ifstream pkC("pkC.dat");
+    FHESIPubKey fhesiPubKey(fhEcontext);
+    fhesiPubKey.Import(pkC);
+    this->client_pubkey=&fhesiPubKey;
+    ifstream smC("smC.dat");
+    KeySwitchSI keySwitchSI(fhEcontext);
+    keySwitchSI.Import(smC);
+    this->client_SM=&keySwitchSI;
+    print("CONTEXT");
+    print(fhEcontext);
+    print("CLIENT PUBLIC KEY");
+    print(fhesiPubKey);
+    print("CLIENT - USERVER SWITCH MATRIX ");
+    print(keySwitchSI);
+    this->socketAccept();
 }
 
-
 void UServer::socketCreate() {
-    this->u_serverSocket=socket(AF_INET,SOCK_STREAM,0);
-    if(this->u_serverSocket<0){
+    this->u_serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (this->u_serverSocket < 0) {
         perror("ERROR IN SOCKET CREATION");
         exit(1);
-    }else{
-        int opt=1;
-        setsockopt(this->u_serverSocket,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
-        string message = "Socket created successfully. File descriptor: "+to_string(this->u_serverSocket);
+    } else {
+        int opt = 1;
+        setsockopt(this->u_serverSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        string message = "Socket created successfully. File descriptor: " + to_string(this->u_serverSocket);
         print(message);
     }
 
@@ -44,14 +61,14 @@ void UServer::socketBind() {
         perror("BIND ERROR");
         exit(1);
     } else {
-        string message= "Socket bound successfully to :["+u_serverIP+":"+to_string(this->u_serverPort)+ "]";
+        string message = "Socket bound successfully to :[" + u_serverIP + ":" + to_string(this->u_serverPort) + "]";
         print(message);
     }
 
 }
 
 void UServer::socketListen() {
-    listen(this->u_serverSocket,5);
+    listen(this->u_serverSocket, 5);
     print("Server is listening...");
 
 }
@@ -69,45 +86,46 @@ void UServer::socketAccept() {
 }
 
 void UServer::handleRequest(int socketFD) {
-    string message = this->receiveMessage(socketFD,4);
-    if(message=="C-PK"){
+    string message = this->receiveMessage(socketFD, 4);
+    if (message == "C-PK") {
         this->receiveEncryptionParamFromClient(socketFD);
-    }else if(message=="C-DATA"){
-
-    }else{
+    } else if (message == "C-DA") {
+        this->clientSocket = socketFD;
+        this->receiveEncryptedData(socketFD);
+    } else {
         perror("ERROR IN PROTOCOL INITIALIZATION");
         return;
     }
 
 }
 
-bool UServer::sendStream(ifstream data, int socket){
-    streampos begin,end;
-    begin =data.tellg();
-    data.seekg(0,ios::end);
-    end=data.tellg();
-    streampos size = end-begin;
-    uint32_t sizek= size;
-    auto * memblock = new char [sizek];
-    data.seekg (0, std::ios::beg);
-    data.read (memblock, sizek);
+bool UServer::sendStream(ifstream data, int socket) {
+    streampos begin, end;
+    begin = data.tellg();
+    data.seekg(0, ios::end);
+    end = data.tellg();
+    streampos size = end - begin;
+    uint32_t sizek = size;
+    auto *memblock = new char[sizek];
+    data.seekg(0, std::ios::beg);
+    data.read(memblock, sizek);
     data.close();
     htonl(sizek);
-    if(0 > send(socket, &sizek, sizeof(uint32_t), 0)){
+    if (0 > send(socket, &sizek, sizeof(uint32_t), 0)) {
         perror("SEND FAILED.");
         return false;
-    }else {
-        this->log(socket,"<--- "+to_string(sizek));
-        if(this->receiveMessage(socket,7)=="SIZE-OK") {
+    } else {
+        this->log(socket, "<--- " + to_string(sizek));
+        if (this->receiveMessage(socket, 7) == "SIZE-OK") {
             ssize_t r = (send(socket, memblock, static_cast<size_t>(size), 0));
             print(r); //for debugging
-            if ( r< 0) {
+            if (r < 0) {
                 perror("SEND FAILED.");
                 return false;
             } else {
                 return true;
             }
-        }else{
+        } else {
             perror("SEND SIZE ERROR");
             return false;
         }
@@ -115,11 +133,11 @@ bool UServer::sendStream(ifstream data, int socket){
 }
 
 bool UServer::sendMessage(int socketFD, string message) {
-    if( send(socketFD , message.c_str() , strlen( message.c_str() ) , 0) < 0){
+    if (send(socketFD, message.c_str(), strlen(message.c_str()), 0) < 0) {
         perror("SEND FAILED.");
         return false;
-    }else{
-        this->log(socketFD,"<--- "+message);
+    } else {
+        this->log(socketFD, "<--- " + message);
         return true;
     }
 }
@@ -127,38 +145,38 @@ bool UServer::sendMessage(int socketFD, string message) {
 string UServer::receiveMessage(int socketFD, int buffersize) {
     char buffer[buffersize];
     string message;
-    if(recv(socketFD, buffer, static_cast<size_t>(buffersize), 0) < 0){
+    if (recv(socketFD, buffer, static_cast<size_t>(buffersize), 0) < 0) {
         perror("RECEIVE FAILED");
     }
-    message=buffer;
+    message = buffer;
     message.erase(static_cast<unsigned long>(buffersize));
-    this->log(socketFD,"---> "+message);
+    this->log(socketFD, "---> " + message);
     return message;
 }
 
-ifstream UServer::receiveStream(int socketFD) {
+ifstream UServer::receiveStream(int socketFD,string filename) {
     uint32_t size;
-    auto *data = (char*)&size;
-    if(recv(socketFD,data,sizeof(uint32_t),0)<0){
+    auto *data = (char *) &size;
+    if (recv(socketFD, data, sizeof(uint32_t), 0) < 0) {
         perror("RECEIVE SIZE ERROR");
     }
     ntohl(size);
-    this->log(socketFD,"--> SIZE: "+to_string(size));
-    this->sendMessage(socketFD,"SIZE-OK");
+    this->log(socketFD, "--> SIZE: " + to_string(size));
+    this->sendMessage(socketFD, "SIZE-OK");
     char buffer[size];
-    ssize_t r= recv(socketFD,buffer,size,0);
+    ssize_t r = recv(socketFD, buffer, size, 0);
     print(r);
-    if(r<0){
+    if (r < 0) {
         perror("RECEIVE STREAM ERROR");
     }
-    ofstream temp("temp.dat",ios::out|ios::binary);
-    temp.write(buffer,size);
+    ofstream temp(filename, ios::out | ios::binary);
+    temp.write(buffer, size);
     temp.close();
 
     return ifstream("temp.dat");
 }
 
-void UServer::log(int socket, string message){
+void UServer::log(int socket, string message) {
     sockaddr address;
     socklen_t addressLength;
     sockaddr_in *addressInternet;
@@ -168,21 +186,60 @@ void UServer::log(int socket, string message){
     addressInternet = (struct sockaddr_in *) &address;
     ip = inet_ntoa(addressInternet->sin_addr);
     port = addressInternet->sin_port;
-    string msg = "["+ip+":"+to_string(port)+"] "+message;
+    string msg = "[" + ip + ":" + to_string(port) + "] " + message;
     print(msg);
 }
 
-void UServer::receiveEncryptionParamFromClient( int socketFD) {
-    this->sendMessage(socketFD,"U-PK-READY");
-    this->receiveStream(socketFD);
-    this->sendMessage(socketFD,"U-PK-RECEIVED");
-    string message = this->receiveMessage(socketFD,4);
-    if(message!="C-SM"){
+void UServer::receiveEncryptionParamFromClient(int socketFD) {
+    this->sendMessage(socketFD, "U-PK-READY");
+    this->receiveStream(socketFD,"pkC.dat");
+    this->sendMessage(socketFD, "U-PK-RECEIVED");
+    string message = this->receiveMessage(socketFD, 4);
+    if (message != "C-SM") {
         perror("ERROR IN PROTOCOL 1-STEP 2");
         return;
     }
-    this->sendMessage(socketFD,"U-SM-READY");
-    this->receiveStream(socketFD);
-    this->sendMessage(socketFD,"U-SM-RECEIVED");
-    this->socketAccept();
+    this->sendMessage(socketFD, "U-SM-READY");
+    this->receiveStream(socketFD,"smC.dat");
+    this->sendMessage(socketFD, "U-SM-RECEIVED");
+    string message1 = this->receiveMessage(socketFD,9);
+    if(message1!="C-CONTEXT"){
+        perror("ERROR IN PROTOCOL 2-STEP 4");
+        return;
+    }
+    this->sendMessage(socketFD,"U-C-READY");
+    this->receiveStream(socketFD,"context.dat");
+    this->sendMessage(socketFD,"U-C-RECEIVED");
+
+    print("PROTOCOL 1 COMPLETED");
+
+
 }
+
+void UServer::receiveEncryptedData(int socketFD) {
+    bool flag = true;
+    this->sendMessage(socketFD, "U-DATA-READY");
+    string message = this->receiveMessage(socketFD, 8);
+    if (message != "C-DATA-P") {
+        perror("ERROR IN PROTOCOL 3-STEP 2");
+        return;
+    }
+    while (flag) {
+        this->sendMessage(socketFD, "U-DATA-P-READY");
+        this->receiveStream(socketFD);
+        this->sendMessage(socketFD, "U-DATA-P-RECEIVED");
+        string message1 = this->receiveMessage(socketFD, 8);
+        if (message1 == "C-DATA-P") {
+            flag = true;
+        } else if (message1 == "C-DATA-E") {
+            flag = false;
+        } else {
+            perror("ERROR IN PROTOCOL 3-STEP 3");
+            return;
+        }
+    }
+    this->sendMessage(socketFD,"U-DATA-RECEIVED");
+    print("DATA RECEIVED - STARTING K-MEANS");
+    while(true){}
+}
+
