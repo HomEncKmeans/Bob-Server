@@ -15,6 +15,7 @@
 #include <utility>
 #include <map>
 #include <bitset>
+#include <Serialization.h>
 
 using namespace std;
 class UServer {
@@ -32,7 +33,8 @@ private:
     FHESIPubKey *client_pubkey;
     KeySwitchSI *client_SM;
     map<size_t ,bitset<6>> A;
-    map<size_t ,Ciphertext> cipherMAP;
+    map<size_t ,string> cipherMAP;
+    map<size_t ,Ciphertext> cipherpoints;
     size_t *centroids;
 
     void socketCreate();

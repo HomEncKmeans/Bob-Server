@@ -36,6 +36,22 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     print("CLIENT - USERVER SWITCH MATRIX ");
     print(keySwitchSI);
     this->socketAccept();
+    print("--------------------POINTS--------------------");
+    for (auto &iter : this->A) {
+        cout << "Point ID: " << iter.first << " Cluster: " << iter.second << endl;
+    }
+    print("--------------------CIPHERTEXTS--------------------");
+    for (auto &iter : this->cipherMAP) {
+        cout << "Point ID: " << iter.first << " Ciphertext: " << iter.second << endl;
+        Ciphertext ciphertext(fhesiPubKey);
+        ifstream in(iter.second);
+        Import(in,ciphertext);
+        print(ciphertext);
+        this->cipherpoints[iter.first]=ciphertext;
+    }
+    print("END of DATA ");
+    this->socketAccept();
+
 }
 
 void UServer::socketCreate() {
@@ -173,7 +189,7 @@ ifstream UServer::receiveStream(int socketFD,string filename) {
     temp.write(buffer, size);
     temp.close();
 
-    return ifstream("temp.dat");
+    return ifstream(filename);
 }
 
 void UServer::log(int socket, string message) {
@@ -224,9 +240,17 @@ void UServer::receiveEncryptedData(int socketFD) {
         perror("ERROR IN PROTOCOL 3-STEP 2");
         return;
     }
+    int i=0;
     while (flag) {
         this->sendMessage(socketFD, "U-DATA-P-READY");
-        this->receiveStream(socketFD);
+        string filename= "point_"+to_string(i)+".dat";
+        ifstream cipher=this->receiveStream(socketFD,filename);
+        std::string buffer((std::istreambuf_iterator<char>(cipher)),std::istreambuf_iterator<char>());
+        hash<string> str_hash;
+        size_t hash_value=str_hash(buffer);
+        bitset<6> cluster;
+        this->A[hash_value]=cluster;
+        this->cipherMAP[hash_value]=filename;
         this->sendMessage(socketFD, "U-DATA-P-RECEIVED");
         string message1 = this->receiveMessage(socketFD, 8);
         if (message1 == "C-DATA-P") {
@@ -237,9 +261,9 @@ void UServer::receiveEncryptedData(int socketFD) {
             perror("ERROR IN PROTOCOL 3-STEP 3");
             return;
         }
+        i++;
     }
     this->sendMessage(socketFD,"U-DATA-RECEIVED");
     print("DATA RECEIVED - STARTING K-MEANS");
-    while(true){}
 }
 
