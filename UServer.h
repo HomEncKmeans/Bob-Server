@@ -15,12 +15,28 @@
 #include <utility>
 #include <map>
 #include <bitset>
-#include <Serialization.h>
+#include "Serialization.h"
+#include <random>
+#include "Ciphertext.h"
 
 using namespace std;
 class UServer {
 private:
+    // K-means
     int k;
+    map<size_t ,bitset<6>> A;
+    map<size_t ,bitset<6>> A_r;
+    map<size_t ,string> cipherMAP;
+    map<size_t ,Ciphertext> cipherpoints;
+    map<size_t,Ciphertext> centroids;
+    map<size_t,int> centroids_clusters;
+    map<int,size_t> rev_centroids_clusters;
+    map<size_t,size_t> cipherIDs;
+    long neg_coef;
+    int max_round;
+    int variance_bound;
+
+    // Networking
     string u_serverIP;
     int u_serverPort;
     int u_serverSocket;
@@ -29,13 +45,10 @@ private:
     int t_serverSocket;
     int clientSocket;
 
+    // Cryptography
     FHEcontext *client_context;
     FHESIPubKey *client_pubkey;
     KeySwitchSI *client_SM;
-    map<size_t ,bitset<6>> A;
-    map<size_t ,string> cipherMAP;
-    map<size_t ,Ciphertext> cipherpoints;
-    size_t *centroids;
 
     void socketCreate();
     void socketBind();
@@ -44,14 +57,22 @@ private:
     void handleRequest(int);
     void receiveEncryptionParamFromClient(int);
     void receiveEncryptedData(int);
+    void connectToTServer();
+    ifstream distanceToStream(const Ciphertext &);
+    void initializeClusters();
+    void initializeCentroids();
+    long calculateVariance();
+    void swapA();
+
 
 public:
-    UServer(string,int,string,int,int);
+    UServer(string,int,string,int,int,int max_round=5,int variance_bound=0);
     bool sendStream(ifstream,int);
     bool sendMessage(int,string);
     string receiveMessage(int, int buffersize=64);
     ifstream receiveStream(int,string filename="temp.dat");
     void log(int,string);
+
 
 
 

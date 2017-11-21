@@ -5,12 +5,17 @@
 #include "UServer.h"
 
 
-UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, int k) {
-    this->k=k;
+UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, int k, int max_round,
+                 int variance_bound) {
+    this->k = k;
+    this->neg_coef = -1;
+    this->max_round = max_round;
+    this->variance_bound = variance_bound;
     this->u_serverIP = move(u_serverIP);
     this->u_serverPort = u_serverPort;
     this->t_serverIP = move(t_serverIP);
     this->t_serverPort = t_serverPort;
+    this->t_serverSocket=-1;
     print("UNTRUSTED SERVER");
     this->socketCreate();
     this->socketBind();
@@ -19,16 +24,16 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     print("CLIENT ENCRYPTION PARAMETERS");
     ifstream contextfile("context.dat");
     FHEcontext fhEcontext(contextfile);
-    this->client_context=&fhEcontext;
-    activeContext=&fhEcontext;
+    this->client_context = &fhEcontext;
+    activeContext = &fhEcontext;
     ifstream pkC("pkC.dat");
     FHESIPubKey fhesiPubKey(fhEcontext);
     fhesiPubKey.Import(pkC);
-    this->client_pubkey=&fhesiPubKey;
+    this->client_pubkey = &fhesiPubKey;
     ifstream smC("smC.dat");
     KeySwitchSI keySwitchSI(fhEcontext);
     keySwitchSI.Import(smC);
-    this->client_SM=&keySwitchSI;
+    this->client_SM = &keySwitchSI;
     print("CONTEXT");
     print(fhEcontext);
     print("CLIENT PUBLIC KEY");
@@ -36,20 +41,39 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     print("CLIENT - USERVER SWITCH MATRIX ");
     print(keySwitchSI);
     this->socketAccept();
-    print("--------------------POINTS--------------------");
-    for (auto &iter : this->A) {
-        cout << "Point ID: " << iter.first << " Cluster: " << iter.second << endl;
-    }
-    print("--------------------CIPHERTEXTS--------------------");
+    print("K-MEANS-INITIALIZATION");
+    this->initializeClusters();
     for (auto &iter : this->cipherMAP) {
-        cout << "Point ID: " << iter.first << " Ciphertext: " << iter.second << endl;
-        Ciphertext ciphertext(fhesiPubKey);
+        Ciphertext ciphertext(*this->client_pubkey);
         ifstream in(iter.second);
-        Import(in,ciphertext);
-        print(ciphertext);
-        this->cipherpoints[iter.first]=ciphertext;
+        Import(in, ciphertext);
+        this->cipherpoints[iter.first] = ciphertext;
     }
-    print("END of DATA ");
+    this->initializeCentroids();
+    ZZ_pX poly_neg_coef = numbertoZZ_pX(this->neg_coef, *this->client_context);
+    Plaintext pneg_coef(*this->client_context, poly_neg_coef);
+    Ciphertext cneg_coef(*this->client_pubkey);
+    fhesiPubKey.Encrypt(cneg_coef, pneg_coef);
+    print("END OF K-MEANS INITIALIZATION");
+    print("----------------------------------");
+    print("STARTING K-MEANS ROUNDS");
+    int r = 0;
+    long s = this->calculateVariance();
+    while (r < this->max_round && s >= this->variance_bound) {
+        for(auto &iter:this->A_r){
+            for(int i=0;i<this->k;i++){
+                Ciphertext distance(*this->client_pubkey);
+                distance=FHE_Sub(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]],cneg_coef,*this->client_SM);
+
+                //continue here
+            }
+        }
+        s=this->calculateVariance();
+        r++;
+        print(r);
+        this->swapA();
+    }
+    print("END-OF-KMEANS");
     this->socketAccept();
 
 }
@@ -170,7 +194,7 @@ string UServer::receiveMessage(int socketFD, int buffersize) {
     return message;
 }
 
-ifstream UServer::receiveStream(int socketFD,string filename) {
+ifstream UServer::receiveStream(int socketFD, string filename) {
     uint32_t size;
     auto *data = (char *) &size;
     if (recv(socketFD, data, sizeof(uint32_t), 0) < 0) {
@@ -208,7 +232,7 @@ void UServer::log(int socket, string message) {
 
 void UServer::receiveEncryptionParamFromClient(int socketFD) {
     this->sendMessage(socketFD, "U-PK-READY");
-    this->receiveStream(socketFD,"pkC.dat");
+    this->receiveStream(socketFD, "pkC.dat");
     this->sendMessage(socketFD, "U-PK-RECEIVED");
     string message = this->receiveMessage(socketFD, 4);
     if (message != "C-SM") {
@@ -216,16 +240,16 @@ void UServer::receiveEncryptionParamFromClient(int socketFD) {
         return;
     }
     this->sendMessage(socketFD, "U-SM-READY");
-    this->receiveStream(socketFD,"smC.dat");
+    this->receiveStream(socketFD, "smC.dat");
     this->sendMessage(socketFD, "U-SM-RECEIVED");
-    string message1 = this->receiveMessage(socketFD,9);
-    if(message1!="C-CONTEXT"){
+    string message1 = this->receiveMessage(socketFD, 9);
+    if (message1 != "C-CONTEXT") {
         perror("ERROR IN PROTOCOL 2-STEP 4");
         return;
     }
-    this->sendMessage(socketFD,"U-C-READY");
-    this->receiveStream(socketFD,"context.dat");
-    this->sendMessage(socketFD,"U-C-RECEIVED");
+    this->sendMessage(socketFD, "U-C-READY");
+    this->receiveStream(socketFD, "context.dat");
+    this->sendMessage(socketFD, "U-C-RECEIVED");
 
     print("PROTOCOL 1 COMPLETED");
 
@@ -240,17 +264,19 @@ void UServer::receiveEncryptedData(int socketFD) {
         perror("ERROR IN PROTOCOL 3-STEP 2");
         return;
     }
-    int i=0;
+    int i = 0;
     while (flag) {
         this->sendMessage(socketFD, "U-DATA-P-READY");
-        string filename= "point_"+to_string(i)+".dat";
-        ifstream cipher=this->receiveStream(socketFD,filename);
-        std::string buffer((std::istreambuf_iterator<char>(cipher)),std::istreambuf_iterator<char>());
+        string filename = "point_" + to_string(i) + ".dat";
+        ifstream cipher = this->receiveStream(socketFD, filename);
+        std::string buffer((std::istreambuf_iterator<char>(cipher)), std::istreambuf_iterator<char>());
         hash<string> str_hash;
-        size_t hash_value=str_hash(buffer);
+        size_t hash_value = str_hash(buffer);
         bitset<6> cluster;
-        this->A[hash_value]=cluster;
-        this->cipherMAP[hash_value]=filename;
+        this->A[hash_value] = cluster;
+        this->A_r[hash_value] = cluster;
+        this->cipherMAP[hash_value] = filename;
+        this->cipherIDs[hash_value] = hash_value;
         this->sendMessage(socketFD, "U-DATA-P-RECEIVED");
         string message1 = this->receiveMessage(socketFD, 8);
         if (message1 == "C-DATA-P") {
@@ -263,7 +289,83 @@ void UServer::receiveEncryptedData(int socketFD) {
         }
         i++;
     }
-    this->sendMessage(socketFD,"U-DATA-RECEIVED");
+    this->sendMessage(socketFD, "U-DATA-RECEIVED");
     print("DATA RECEIVED - STARTING K-MEANS");
 }
 
+void UServer::initializeClusters() {
+    default_random_engine generator;
+    uniform_int_distribution<int> distribution(0, this->k - 1);
+    int seed;
+    for (auto &iter : this->A) {
+        seed = distribution(generator);
+        iter.second[seed] = 1;
+    }
+}
+
+void UServer::initializeCentroids() {
+    for (int i = 0; i < this->k; i++) {
+        for (auto &iter : this->A) {
+            if (iter.second[i] == 1) {
+                this->centroids[iter.first] = cipherpoints[iter.first];
+                this->centroids_clusters[iter.first] = i;
+                break;
+            }
+        }
+    }
+    for(auto &iter:this->centroids_clusters){
+        this->rev_centroids_clusters[iter.second]=this->cipherIDs[iter.first];
+    }
+}
+
+long UServer::calculateVariance() {
+    int variance = 0;
+    bitset<6> zeroset;
+    for (auto &iter:this->A) {
+        if (zeroset != (iter.second ^ this->A_r[iter.first])) {
+            variance++;
+        }
+    }
+    return variance;
+}
+
+void UServer::swapA() {
+    this->A= this->A_r;
+    bitset<6> zeroset;
+    for(auto &iter:this->A_r){
+        iter.second=zeroset;
+    }
+}
+
+void UServer::connectToTServer() {
+    struct sockaddr_in t_server_address;
+    if (this->t_serverSocket == -1) {
+        this->t_serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+        if (this->t_serverSocket < 0) {
+            perror("ERROR ON TSERVER SOCKET CREATION");
+            exit(1);
+        } else {
+            string message =
+                    "Socket for TServer created successfully. File descriptor: " + to_string(this->t_serverSocket);
+            print(message);
+        }
+
+    }
+    t_server_address.sin_addr.s_addr = inet_addr(this->t_serverIP.c_str());
+    t_server_address.sin_family = AF_INET;
+    t_server_address.sin_port = htons(static_cast<uint16_t>(this->t_serverPort));
+
+    if (connect(this->t_serverSocket, (struct sockaddr *) &t_server_address, sizeof(t_server_address)) < 0) {
+        perror("ERROR. CONNECTION FAILED TO TSERVER");
+
+    } else {
+        print("KCLIENT CONNECTED TO TSERVER");
+    }
+
+}
+
+ifstream UServer::distanceToStream(const Ciphertext &distance) {
+    ofstream ofstream1("distance.dat");
+    Export(ofstream1, distance);
+    return ifstream("distance.dat");
+}

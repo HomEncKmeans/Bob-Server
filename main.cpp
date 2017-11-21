@@ -7,7 +7,7 @@ int main() {
     clock_t c_start = clock();
     auto t_start = chrono::high_resolution_clock::now();
 
-    UServer server("127.0.0.1",5001,"127.0.0.1",5002,2);
+    UServer server("127.0.0.1",5001,"127.0.0.1",5002,3);
 
     std::clock_t c_end = std::clock();
     auto t_end = std::chrono::high_resolution_clock::now();
