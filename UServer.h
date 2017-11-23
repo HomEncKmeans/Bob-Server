@@ -18,12 +18,13 @@
 #include "Serialization.h"
 #include <random>
 #include "Ciphertext.h"
+#include "unistd.h"
 
 using namespace std;
 class UServer {
 private:
     // K-means
-    int k;
+    unsigned k;
     map<size_t ,bitset<6>> A;
     map<size_t ,bitset<6>> A_r;
     map<size_t ,string> cipherMAP;
@@ -63,10 +64,10 @@ private:
     void initializeCentroids();
     long calculateVariance();
     void swapA();
-
+    void initializeKMToTServer();
 
 public:
-    UServer(string,int,string,int,int,int max_round=5,int variance_bound=0);
+    UServer(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
     bool sendStream(ifstream,int);
     bool sendMessage(int,string);
     string receiveMessage(int, int buffersize=64);

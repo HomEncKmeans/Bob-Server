@@ -5,7 +5,7 @@
 #include "UServer.h"
 
 
-UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, int k, int max_round,
+UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, unsigned k, int max_round,
                  int variance_bound) {
     this->k = k;
     this->neg_coef = -1;
@@ -42,6 +42,7 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     print(keySwitchSI);
     this->socketAccept();
     print("K-MEANS-INITIALIZATION");
+    this->initializeKMToTServer();
     this->initializeClusters();
     for (auto &iter : this->cipherMAP) {
         Ciphertext ciphertext(*this->client_pubkey);
@@ -61,12 +62,43 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     long s = this->calculateVariance();
     while (r < this->max_round && s >= this->variance_bound) {
         for(auto &iter:this->A_r){
+            this->connectToTServer();
+            this->sendMessage(this->t_serverSocket,"U-DP");
+            string message = this->receiveMessage(this->t_serverSocket, 7);
+            if (message != "T-READY") {
+                perror("ERROR IN PROTOCOL 5-STEP 1");
+                return;
+            }
             for(int i=0;i<this->k;i++){
+                auto cluster_index= static_cast<u_int32_t>(i);
+                if (0 > send(this->t_serverSocket, &cluster_index, sizeof(uint32_t), 0)) {
+                    perror("SEND K FAILED.");
+                    return;
+                }
+                string message1 = this->receiveMessage(this->t_serverSocket, 13);
+                if (message1 != "T-RECEIVED-CI") {
+                    perror("ERROR IN PROTOCOL 5-STEP 2");
+                    return;
+                }
                 Ciphertext distance(*this->client_pubkey);
                 distance=FHE_Sub(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]],cneg_coef,*this->client_SM);
-
-                //continue here
+                this->sendStream(this->distanceToStream(distance),this->t_serverSocket);
+                string message2 = this->receiveMessage(this->t_serverSocket, 12);
+                if (message2 != "T-D-RECEIVED") {
+                    perror("ERROR IN PROTOCOL 5-STEP 3");
+                    return;
+                }
             }
+            this->sendMessage(this->t_serverSocket,"U-R-I");
+            uint32_t index;
+            auto *data = (char*)&index;
+            if(recv(this->t_serverSocket,data,sizeof(uint32_t),0)<0){
+                perror("RECEIVE K ERROR");
+            }
+            ntohl(index);
+            iter.second[index]=1;
+            close(this->t_serverSocket);
+            this->t_serverSocket=-1;
         }
         s=this->calculateVariance();
         r++;
@@ -359,7 +391,7 @@ void UServer::connectToTServer() {
         perror("ERROR. CONNECTION FAILED TO TSERVER");
 
     } else {
-        print("KCLIENT CONNECTED TO TSERVER");
+        print("USERVER CONNECTED TO TSERVER");
     }
 
 }
@@ -368,4 +400,27 @@ ifstream UServer::distanceToStream(const Ciphertext &distance) {
     ofstream ofstream1("distance.dat");
     Export(ofstream1, distance);
     return ifstream("distance.dat");
+}
+
+void UServer::initializeKMToTServer() {
+    this->connectToTServer();
+    this->sendMessage(this->t_serverSocket,"U-KM");
+    string message = this->receiveMessage(this->t_serverSocket, 7);
+    if (message != "T-READY") {
+        perror("ERROR IN PROTOCOL 4-STEP 1");
+        return;
+    }
+    u_int32_t k_factor=this->k;
+    if (0 > send(this->t_serverSocket, &k_factor, sizeof(uint32_t), 0)) {
+        perror("SEND K FAILED.");
+        return;
+    }
+    string message1 = this->receiveMessage(this->t_serverSocket, 12);
+    if (message1 != "T-K-RECEIVED") {
+        perror("ERROR IN PROTOCOL 4-STEP 2");
+        return;
+    }
+    close(this->t_serverSocket);
+    this->t_serverSocket=-1;
+
 }
