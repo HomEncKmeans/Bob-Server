@@ -8,7 +8,6 @@
 UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, unsigned k, int max_round,
                  int variance_bound) {
     this->k = k;
-    this->neg_coef = -1;
     this->max_round = max_round;
     this->variance_bound = variance_bound;
     this->u_serverIP = move(u_serverIP);
@@ -51,10 +50,6 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
         this->cipherpoints[iter.first] = ciphertext;
     }
     this->initializeCentroids();
-    ZZ_pX poly_neg_coef = numbertoZZ_pX(this->neg_coef, *this->client_context);
-    Plaintext pneg_coef(*this->client_context, poly_neg_coef);
-    Ciphertext cneg_coef(*this->client_pubkey);
-    fhesiPubKey.Encrypt(cneg_coef, pneg_coef);
     print("END OF K-MEANS INITIALIZATION");
     print("----------------------------------");
     print("STARTING K-MEANS ROUNDS");
@@ -81,7 +76,7 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
                     return;
                 }
                 Ciphertext distance(*this->client_pubkey);
-                distance=FHE_Sub(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]],cneg_coef,*this->client_SM);
+                distance=FHE_HM(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]]);
                 this->sendStream(this->distanceToStream(distance),this->t_serverSocket);
                 string message2 = this->receiveMessage(this->t_serverSocket, 12);
                 if (message2 != "T-D-RECEIVED") {
@@ -93,10 +88,12 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
             uint32_t index;
             auto *data = (char*)&index;
             if(recv(this->t_serverSocket,data,sizeof(uint32_t),0)<0){
-                perror("RECEIVE K ERROR");
+                perror("RECEIVE INDEX ERROR. ERROR IN PROTOCOL 5-STEP 4");
             }
             ntohl(index);
+            this->log(this->t_serverSocket,"--> INDEX: "+to_string(index));
             iter.second[index]=1;
+            this->sendMessage(this->t_serverSocket,"U-RECEIVED-I");
             close(this->t_serverSocket);
             this->t_serverSocket=-1;
         }

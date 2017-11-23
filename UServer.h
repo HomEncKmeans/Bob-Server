@@ -33,7 +33,6 @@ private:
     map<size_t,int> centroids_clusters;
     map<int,size_t> rev_centroids_clusters;
     map<size_t,size_t> cipherIDs;
-    long neg_coef;
     int max_round;
     int variance_bound;
 
