@@ -14,7 +14,7 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     this->u_serverPort = u_serverPort;
     this->t_serverIP = move(t_serverIP);
     this->t_serverPort = t_serverPort;
-    this->t_serverSocket=-1;
+    this->t_serverSocket = -1;
     print("UNTRUSTED SERVER");
     this->socketCreate();
     this->socketBind();
@@ -56,16 +56,16 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     int r = 0;
     long s = this->calculateVariance();
     while (r < this->max_round && s >= this->variance_bound) {
-        for(auto &iter:this->A_r){
+        for (auto &iter:this->A_r) {
             this->connectToTServer();
-            this->sendMessage(this->t_serverSocket,"U-DP");
+            this->sendMessage(this->t_serverSocket, "U-DP");
             string message = this->receiveMessage(this->t_serverSocket, 7);
             if (message != "T-READY") {
                 perror("ERROR IN PROTOCOL 5-STEP 1");
                 return;
             }
-            for(int i=0;i<this->k;i++){
-                auto cluster_index= static_cast<u_int32_t>(i);
+            for (int i = 0; i < this->k; i++) {
+                auto cluster_index = static_cast<u_int32_t>(i);
                 if (0 > send(this->t_serverSocket, &cluster_index, sizeof(uint32_t), 0)) {
                     perror("SEND K FAILED.");
                     return;
@@ -76,32 +76,93 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
                     return;
                 }
                 Ciphertext distance(*this->client_pubkey);
-                distance=FHE_HM(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]]);
-                this->sendStream(this->distanceToStream(distance),this->t_serverSocket);
+                distance = FHE_HM(this->cipherpoints[iter.first], this->centroids[this->rev_centroids_clusters[i]]);
+                this->sendStream(this->distanceToStream(distance), this->t_serverSocket);
                 string message2 = this->receiveMessage(this->t_serverSocket, 12);
                 if (message2 != "T-D-RECEIVED") {
                     perror("ERROR IN PROTOCOL 5-STEP 3");
                     return;
                 }
             }
-            this->sendMessage(this->t_serverSocket,"U-R-I");
+            this->sendMessage(this->t_serverSocket, "U-R-I");
             uint32_t index;
-            auto *data = (char*)&index;
-            if(recv(this->t_serverSocket,data,sizeof(uint32_t),0)<0){
+            auto *data = (char *) &index;
+            if (recv(this->t_serverSocket, data, sizeof(uint32_t), 0) < 0) {
                 perror("RECEIVE INDEX ERROR. ERROR IN PROTOCOL 5-STEP 4");
             }
             ntohl(index);
-            this->log(this->t_serverSocket,"--> INDEX: "+to_string(index));
-            iter.second[index]=1;
-            this->sendMessage(this->t_serverSocket,"U-RECEIVED-I");
+            this->log(this->t_serverSocket, "--> INDEX: " + to_string(index));
+            iter.second[index] = 1;
+            this->sendMessage(this->t_serverSocket, "U-RECEIVED-I");
             close(this->t_serverSocket);
-            this->t_serverSocket=-1;
+            this->t_serverSocket = -1;
         }
-        s=this->calculateVariance();
+        s = this->calculateVariance();
         r++;
         print(r);
         this->swapA();
+        if (r < this->max_round && s >= this->variance_bound) {
+            this->connectToTServer();
+            print("CREATE NEW CENTROIDS");
+            this->sendMessage(this->t_serverSocket, "U-NC");
+            string message3 = this->receiveMessage(this->t_serverSocket, 10);
+            if (message3 != "T-NC-READY") {
+                perror("ERROR IN PROTOCOL 6-STEP 1");
+                return;
+            }
+            this->centroids_clusters.clear();
+            this->centroids.clear();
+            for (unsigned i = 0; i < this->k; i++) {
+                u_int32_t index = i;
+                if (0 > send(this->t_serverSocket, &index, sizeof(uint32_t), 0)) {
+                    perror("SEND INDEX FAILED.");
+                    return;
+                }
+                string message4 = this->receiveMessage(this->t_serverSocket, 13);
+                if (message4 != "T-RECEIVED-CI") {
+                    perror("ERROR IN PROTOCOL 6-STEP 2");
+                    return;
+                }
+                vector<size_t> cluster_members;
+                for (auto &iter:this->A) {
+                    if (iter.second[i] == 1) {
+                        cluster_members.push_back(this->cipherIDs[iter.first]);
+                    }
+                }
+                Ciphertext total;
+                total = this->cipherpoints[cluster_members[0]];
+                for (unsigned j = 1; j < cluster_members.size(); j++) {
+                    total += this->cipherpoints[cluster_members[j]];
+                }
+                this->sendStream(this->centroidsToStream(total), this->t_serverSocket);
+                string message5 = this->receiveMessage(this->t_serverSocket, 12);
+                if (message5 != "T-RECEIVED-C") {
+                    perror("ERROR IN PROTOCOL 6-STEP 3");
+                    return;
+                }
+                Ciphertext centroid(*this->client_pubkey);
+                ifstream cipherCentroid = this->receiveStream(this->t_serverSocket, to_string(index) + "-centroid.dat");
+                std::string buffer((std::istreambuf_iterator<char>(cipherCentroid)), std::istreambuf_iterator<char>());
+                hash<string> str_hash;
+                size_t hash_value = str_hash(buffer);
+                ifstream in(to_string(index) + "-centroid.dat");
+                Import(in, centroid);
+                this->rev_centroids_clusters[i] = hash_value;
+                this->centroids_clusters[hash_value] = i;
+                this->centroids[hash_value] = centroid;
+                this->sendMessage(this->t_serverSocket, "U-NC-RECEIVED");
+            }
+            this->sendMessage(this->t_serverSocket, "U-C-UPDATED");
+            string message6 = this->receiveMessage(this->t_serverSocket, 7);
+            if (message6 != "T-READY") {
+                perror("ERROR IN PROTOCOL 6-STEP 4");
+                return;
+            }
+        }
+
     }
+    this->endKMToTserver();
+    this->resultsToKClient();
     print("END-OF-KMEANS");
     this->socketAccept();
 
@@ -342,8 +403,8 @@ void UServer::initializeCentroids() {
             }
         }
     }
-    for(auto &iter:this->centroids_clusters){
-        this->rev_centroids_clusters[iter.second]=this->cipherIDs[iter.first];
+    for (auto &iter:this->centroids_clusters) {
+        this->rev_centroids_clusters[iter.second] = this->cipherIDs[iter.first];
     }
 }
 
@@ -359,10 +420,10 @@ long UServer::calculateVariance() {
 }
 
 void UServer::swapA() {
-    this->A= this->A_r;
+    this->A = this->A_r;
     bitset<6> zeroset;
-    for(auto &iter:this->A_r){
-        iter.second=zeroset;
+    for (auto &iter:this->A_r) {
+        iter.second = zeroset;
     }
 }
 
@@ -401,13 +462,13 @@ ifstream UServer::distanceToStream(const Ciphertext &distance) {
 
 void UServer::initializeKMToTServer() {
     this->connectToTServer();
-    this->sendMessage(this->t_serverSocket,"U-KM");
+    this->sendMessage(this->t_serverSocket, "U-KM");
     string message = this->receiveMessage(this->t_serverSocket, 7);
     if (message != "T-READY") {
         perror("ERROR IN PROTOCOL 4-STEP 1");
         return;
     }
-    u_int32_t k_factor=this->k;
+    u_int32_t k_factor = this->k;
     if (0 > send(this->t_serverSocket, &k_factor, sizeof(uint32_t), 0)) {
         perror("SEND K FAILED.");
         return;
@@ -418,6 +479,28 @@ void UServer::initializeKMToTServer() {
         return;
     }
     close(this->t_serverSocket);
-    this->t_serverSocket=-1;
+    this->t_serverSocket = -1;
+
+}
+
+ifstream UServer::centroidsToStream(const Ciphertext &centroid) {
+    ofstream ofstream1("centroid.dat");
+    Export(ofstream1, centroid);
+    return ifstream("centroid.dat");
+}
+
+void UServer::endKMToTserver() {
+    this->connectToTServer();
+    this->sendMessage(this->t_serverSocket, "UEKM");
+    string message = this->receiveMessage(this->t_serverSocket, 5);
+    if (message != "T-END") {
+        perror("ERROR IN PROTOCOL 7-STEP 1");
+        return;
+    }
+}
+
+void UServer::resultsToKClient() {
+
+
 
 }

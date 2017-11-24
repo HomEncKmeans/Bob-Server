@@ -64,6 +64,9 @@ private:
     long calculateVariance();
     void swapA();
     void initializeKMToTServer();
+    void endKMToTserver();
+    ifstream centroidsToStream(const Ciphertext &);
+    void resultsToKClient();
 
 public:
     UServer(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
