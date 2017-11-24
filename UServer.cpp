@@ -56,6 +56,7 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
     int r = 0;
     long s = this->calculateVariance();
     while (r < this->max_round && s >= this->variance_bound) {
+        print("ROUND: "+to_string(r));
         for (auto &iter:this->A_r) {
             this->connectToTServer();
             this->sendMessage(this->t_serverSocket, "U-DP");
@@ -65,7 +66,7 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
                 return;
             }
             for (int i = 0; i < this->k; i++) {
-                auto cluster_index = static_cast<u_int32_t>(i);
+                auto cluster_index = static_cast<uint32_t>(i);
                 if (0 > send(this->t_serverSocket, &cluster_index, sizeof(uint32_t), 0)) {
                     perror("SEND K FAILED.");
                     return;
@@ -113,7 +114,7 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
             this->centroids_clusters.clear();
             this->centroids.clear();
             for (unsigned i = 0; i < this->k; i++) {
-                u_int32_t index = i;
+                uint32_t index = i;
                 if (0 > send(this->t_serverSocket, &index, sizeof(uint32_t), 0)) {
                     perror("SEND INDEX FAILED.");
                     return;
@@ -158,13 +159,15 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
                 perror("ERROR IN PROTOCOL 6-STEP 4");
                 return;
             }
+            close(this->t_serverSocket);
+            this->t_serverSocket = -1;
         }
 
     }
     this->endKMToTserver();
     this->resultsToKClient();
     print("END-OF-KMEANS");
-    this->socketAccept();
+    //this->socketAccept();
 
 }
 
@@ -468,7 +471,7 @@ void UServer::initializeKMToTServer() {
         perror("ERROR IN PROTOCOL 4-STEP 1");
         return;
     }
-    u_int32_t k_factor = this->k;
+    uint32_t k_factor = this->k;
     if (0 > send(this->t_serverSocket, &k_factor, sizeof(uint32_t), 0)) {
         perror("SEND K FAILED.");
         return;
@@ -500,7 +503,50 @@ void UServer::endKMToTserver() {
 }
 
 void UServer::resultsToKClient() {
-
-
+    this->sendMessage(this->clientSocket, "U-RESULT");
+    string message = this->receiveMessage(this->clientSocket, 7);
+    if (message != "K-READY") {
+        perror("ERROR IN PROTOCOL 8-STEP 1");
+        return;
+    }
+    for (auto &iter:this->A) {
+        this->sendMessage(this->clientSocket, "U-P");
+        string message1 = this->receiveMessage(this->clientSocket, 5);
+        if (message1 != "U-P-R") {
+            perror("ERROR IN PROTOCOL 8-STEP 2");
+            return;
+        }
+        auto identity =(uint32_t) iter.first;
+        if (0 > send(this->clientSocket, &identity, sizeof(uint32_t), 0)) {
+            perror("SEND IDENTITY FAILED.");
+            return;
+        }
+        string message2 = this->receiveMessage(this->clientSocket, 5);
+        if (message2 != "P-I-R") {
+            perror("ERROR IN PROTOCOL 8-STEP 3");
+            return;
+        }
+        uint32_t index;
+        for (unsigned i = 0; i < this->k; i++) {
+            if (iter.second[i] == 1) {
+                index = i;
+            }
+        }
+        if (0 > send(this->clientSocket, &index, sizeof(uint32_t), 0)) {
+            perror("SEND CLUSTER INDEX FAILED.");
+            return;
+        }
+        string message3 = this->receiveMessage(this->clientSocket, 6);
+        if (message3 != "P-CI-R") {
+            perror("ERROR IN PROTOCOL 8-STEP 3");
+            return;
+        }
+    }
+    this->sendMessage(this->clientSocket, "U-RESULT-E");
+    string message4 = this->receiveMessage(this->clientSocket, 5);
+    if (message4 != "K-END") {
+        perror("ERROR IN PROTOCOL 8-STEP 3");
+        return;
+    }
 
 }
