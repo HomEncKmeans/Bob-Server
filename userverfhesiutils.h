@@ -15,8 +15,16 @@
 #include <bitset>
 #include "ZZ_pX.h"
 #include "Ciphertext.h"
+#include "chrono"
+#include "ctime"
+#include "iomanip"
 
 Ciphertext FHE_HM(Ciphertext &c1, Ciphertext &c2);
+void timeCalulator(const clock_t &c_start, const chrono::high_resolution_clock::time_point &t_start);
+Ciphertext euclideanDistance(vector<Ciphertext> &cpoint1, vector<Ciphertext> &cpoint2, KeySwitchSI &keySwitchSI);
+Ciphertext euclideanDistanceP(Ciphertext &c1, Ciphertext &c2, KeySwitchSI &keySwitchSI);
+
+
 template <typename T>
 void print(const T &message){
     std::cout<<message<<std::endl;

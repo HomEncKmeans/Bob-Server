@@ -1,5 +1,5 @@
 
-#include "UServer.h"
+#include "UServerV1.h"
 #include <ctime>
 #include <chrono>
 #include <iomanip>
@@ -7,7 +7,7 @@ int main() {
     clock_t c_start = clock();
     auto t_start = chrono::high_resolution_clock::now();
 
-    UServer server("127.0.0.1",5001,"127.0.0.1",5002,3);
+    UServerV1 server("127.0.0.1",5001,3);
 
     std::clock_t c_end = std::clock();
     auto t_end = std::chrono::high_resolution_clock::now();
