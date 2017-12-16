@@ -97,7 +97,7 @@ void UServerV1::handleRequest(int socketFD) {
         this->sendDistances(socketFD);
     } else if (message == "T-NC") {
         this->receiveCentroids(socketFD);
-    } else if (message == "UEKM") {
+    } else if (message == "TEKM") {
         this->sendMessage(socketFD, "U-END");
         this->active = false;
         print("UServerV1 STOP AND EXIT");
@@ -339,6 +339,7 @@ void UServerV1::receiveCentroids(int socketFD) {
 
 void UServerV1::sendDistances(int socketFD) {
     this->sendMessage(socketFD,"U-READY");
+
     for(auto &iter:this->cipherpoints){
         uint32_t identifier = iter.first;
         htonl(identifier);
@@ -352,7 +353,7 @@ void UServerV1::sendDistances(int socketFD) {
             return;
         }
         for(auto &iter1:this->centroids){
-            uint32_t index_of_cluster = iter.first;
+            uint32_t index_of_cluster = iter1.first;
             htonl(index_of_cluster);
             if (0 > send(socketFD, &index_of_cluster, sizeof(uint32_t), 0)) {
                 perror("ERROR IN PROTOCOL 5-STEP 4.");
