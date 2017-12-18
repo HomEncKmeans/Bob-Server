@@ -5,8 +5,9 @@
 #include "UServerV2.h"
 
 
-UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, unsigned k, int max_round,
-                 int variance_bound) {
+UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int t_serverPort, unsigned k,
+                     int max_round,
+                     int variance_bound) {
     this->k = k;
     this->max_round = max_round;
     this->variance_bound = variance_bound;
@@ -50,7 +51,7 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
     int r = 0;
     long s = this->calculateVariance();
     while (r < this->max_round && s >= this->variance_bound) {
-        print("ROUND: "+to_string(r));
+        print("ROUND: " + to_string(r));
         for (auto &iter:this->A_r) {
             this->connectToTServer();
             this->sendMessage(this->t_serverSocket, "U-DP");
@@ -62,7 +63,7 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
             for (int i = 0; i < this->k; i++) {
                 auto cluster_index = static_cast<uint32_t>(i);
                 if (0 > send(this->t_serverSocket, &cluster_index, sizeof(uint32_t), 0)) {
-                    perror("SEND K FAILED.");
+                    perror("SEND CLUSTER INDEX FAILED.");
                     return;
                 }
                 string message1 = this->receiveMessage(this->t_serverSocket, 13);
@@ -71,7 +72,10 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
                     return;
                 }
                 Ciphertext distance;
-                distance = euclideanDistance(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]],*this->client_SM);
+                print(iter.first);
+                print(this->rev_centroids_clusters[i]);
+                distance = euclideanDistance(this->cipherpoints[iter.first],
+                                             this->centroids[this->rev_centroids_clusters[i]], *this->client_SM);
                 this->sendStream(this->distanceToStream(distance), this->t_serverSocket);
                 string message2 = this->receiveMessage(this->t_serverSocket, 12);
                 if (message2 != "T-D-RECEIVED") {
@@ -118,14 +122,30 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
                     perror("ERROR IN PROTOCOL 6-STEP 2");
                     return;
                 }
-                vector<uint32_t > cluster_members;
+                vector<uint32_t> cluster_members;
                 for (auto &iter:this->A) {
                     if (iter.second[i] == 1) {
                         cluster_members.push_back(iter.first);
                     }
                 }
+                bool empty = cluster_members.empty();
+                vector<Ciphertext> random_point;
+                if (empty) {
+                    default_random_engine generator;
+                    uniform_int_distribution<int> distribution(0, this->number_of_points - 1);
+                    int seed;
+                    int count = 0;
+                    for (auto &iter : this->A) {
+                        if (seed == count) {
+                            random_point = cipherpoints[iter.first];
+                        }
+                        count++;
+                    }
+                }
+
                 vector<Ciphertext> centroid;
-                for(unsigned j=0;j<this->dim;j++){
+                for (unsigned j = 0; j < this->dim; j++) {
+
                     uint32_t coef_index = j;
                     if (0 > send(this->t_serverSocket, &coef_index, sizeof(uint32_t), 0)) {
                         perror("SEND COEF INDEX FAILED.");
@@ -137,23 +157,28 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
                         return;
                     }
                     Ciphertext total_of_coef;
-                    total_of_coef = this->cipherpoints[cluster_members[0]][j];
-                    for (unsigned f = 1; f < cluster_members.size(); f++) {
-                        total_of_coef += this->cipherpoints[cluster_members[f]][j];
+                    if (empty) {
+                        total_of_coef = random_point[j];
+                    } else {
+                        total_of_coef = this->cipherpoints[cluster_members[0]][j];
+                        for (unsigned f = 1; f < cluster_members.size(); f++) {
+                            total_of_coef += this->cipherpoints[cluster_members[f]][j];
+                        }
                     }
+
                     this->sendStream(this->centroidsCoefToStream(total_of_coef), this->t_serverSocket);
                     string message6 = this->receiveMessage(this->t_serverSocket, 15);
-                    if (message5 != "T-COEF-RECEIVED") {
+                    if (message6 != "T-COEF-RECEIVED") {
                         perror("ERROR IN PROTOCOL 6-STEP 3");
                         return;
                     }
-                    this->sendMessage(this->t_serverSocket,"U-R-C");
+                    this->sendMessage(this->t_serverSocket, "U-R-C");
                     Ciphertext centroid_coef(*this->client_pubkey);
                     this->receiveStream(this->t_serverSocket, to_string(i) + "-centroid.dat");
                     ifstream in(to_string(i) + "-centroid.dat");
                     Import(in, centroid_coef);
                     centroid.push_back(centroid_coef);
-                    this->sendMessage(this->t_serverSocket,"U-R-COEF");
+                    this->sendMessage(this->t_serverSocket, "U-R-COEF");
                 }
                 srand(static_cast<unsigned int>(time(NULL)));
                 uint32_t identifier;
@@ -360,7 +385,7 @@ void UServerV2::receiveEncryptionParamFromClient(int socketFD) {
 }
 
 void UServerV2::receiveEncryptedData(int socketFD) {
-    this->sendMessage(socketFD,"U-DATA-READY");
+    this->sendMessage(socketFD, "U-DATA-READY");
     uint32_t dimension;
     auto *data1 = (char *) &dimension;
     if (recv(socketFD, data1, sizeof(uint32_t), 0) < 0) {
@@ -368,8 +393,8 @@ void UServerV2::receiveEncryptedData(int socketFD) {
     }
     ntohl(dimension);
     this->log(socketFD, "--> Data dimension: " + to_string(dimension));
-    this->dim=dimension;
-    this->sendMessage(socketFD,"U-D-RECEIVED");
+    this->dim = dimension;
+    this->sendMessage(socketFD, "U-D-RECEIVED");
     uint32_t numberofpoints;
     auto *data2 = (char *) &numberofpoints;
     if (recv(socketFD, data2, sizeof(uint32_t), 0) < 0) {
@@ -377,48 +402,52 @@ void UServerV2::receiveEncryptedData(int socketFD) {
     }
     ntohl(numberofpoints);
     this->log(socketFD, "--> Number of Points: " + to_string(numberofpoints));
-    this->number_of_points=numberofpoints;
-    this->sendMessage(socketFD,"U-N-RECEIVED");
-    string message = this->receiveMessage(socketFD,8);
+    this->number_of_points = numberofpoints;
+    this->sendMessage(socketFD, "U-N-RECEIVED");
+    string message = this->receiveMessage(socketFD, 8);
     if (message != "C-DATA-P") {
         perror("ERROR IN PROTOCOL 3.1-STEP 4");
         return;
     }
-    this->sendMessage(socketFD,"U-DATA-P-READY");
-    for(unsigned i=0; i<this->number_of_points;i++){
+    this->sendMessage(socketFD, "U-DATA-P-READY");
+    for (unsigned i = 0; i < this->number_of_points; i++) {
         uint32_t identifier;
         auto *data = (char *) &identifier;
         if (recv(socketFD, data, sizeof(uint32_t), 0) < 0) {
             perror("RECEIVE CLUSTER INDEX ERROR. ERROR IN PROTOCOL 3.1-STEP 5");
         }
         ntohl(identifier);
-        this->sendMessage(socketFD,"U-P-I-RECEIVED");
+        this->sendMessage(socketFD, "U-P-I-RECEIVED");
         vector<Ciphertext> encrypted_point;
-        for(unsigned j=0; j<this->dim;j++){
+        for (unsigned j = 0; j < this->dim; j++) {
             uint32_t index;
             auto *data3 = (char *) &index;
             if (recv(socketFD, data3, sizeof(uint32_t), 0) < 0) {
                 perror("RECEIVE CLUSTER INDEX ERROR. ERROR IN PROTOCOL 3.1-STEP 6");
             }
             ntohl(index);
-            this->sendMessage(socketFD,"U-INDEX-RECEIVED");
+            this->sendMessage(socketFD, "U-INDEX-RECEIVED");
             string filename = "coef_" + to_string(j) + ".dat";
             ifstream cipher = this->receiveStream(socketFD, filename);
             Ciphertext ciphertext(*this->client_pubkey);
             ifstream in(filename);
             Import(in, ciphertext);
             encrypted_point.push_back(ciphertext);
-            this->sendMessage(socketFD,"U-COEF-RECEIVED");
+            this->sendMessage(socketFD, "U-COEF-RECEIVED");
         }
-        this->cipherpoints[identifier]=encrypted_point;
+        this->cipherpoints[identifier] = encrypted_point;
+        bitset<6> cluster;
+        this->A[identifier] = cluster;
+        this->A_r[identifier] = cluster;
+        this->cipherIDs[identifier] = identifier;
     }
 
-    string message1 = this->receiveMessage(socketFD,8);
+    string message1 = this->receiveMessage(socketFD, 8);
     if (message1 != "C-DATA-E") {
         perror("ERROR IN PROTOCOL 3.1-STEP 7");
         return;
     }
-    this->sendMessage(socketFD,"U-DATA-RECEIVED");
+    this->sendMessage(socketFD, "U-DATA-RECEIVED");
     print("PROTOCOL 3 COMPLETED");
 
     print("DATA RECEIVED - STARTING K-MEANS");
@@ -564,7 +593,7 @@ void UServerV2::resultsToKClient() {
             perror("ERROR IN PROTOCOL 8-STEP 2");
             return;
         }
-        auto identity =(uint32_t) iter.first;
+        auto identity = (uint32_t) iter.first;
         htonl(identity);
         if (0 > send(this->clientSocket, &identity, sizeof(uint32_t), 0)) {
             perror("SEND IDENTITY FAILED.");
