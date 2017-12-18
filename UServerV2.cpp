@@ -43,12 +43,6 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
     print("K-MEANS-INITIALIZATION");
     this->initializeKMToTServer();
     this->initializeClusters();
-    for (auto &iter : this->cipherMAP) {
-        Ciphertext ciphertext(*this->client_pubkey);
-        ifstream in(iter.second);
-        Import(in, ciphertext);
-        this->cipherpoints[iter.first] = ciphertext;
-    }
     this->initializeCentroids();
     print("END OF K-MEANS INITIALIZATION");
     print("----------------------------------");
@@ -76,8 +70,8 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
                     perror("ERROR IN PROTOCOL 5-STEP 2");
                     return;
                 }
-                Ciphertext distance(*this->client_pubkey);
-                distance = FHE_HM(this->cipherpoints[iter.first], this->centroids[this->rev_centroids_clusters[i]]);
+                Ciphertext distance;
+                distance = euclideanDistance(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]],*this->client_SM);
                 this->sendStream(this->distanceToStream(distance), this->t_serverSocket);
                 string message2 = this->receiveMessage(this->t_serverSocket, 12);
                 if (message2 != "T-D-RECEIVED") {
@@ -114,8 +108,8 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
             this->centroids_clusters.clear();
             this->centroids.clear();
             for (unsigned i = 0; i < this->k; i++) {
-                uint32_t index = i;
-                if (0 > send(this->t_serverSocket, &index, sizeof(uint32_t), 0)) {
+                uint32_t centroid_index = i;
+                if (0 > send(this->t_serverSocket, &centroid_index, sizeof(uint32_t), 0)) {
                     perror("SEND INDEX FAILED.");
                     return;
                 }
@@ -124,33 +118,49 @@ UServerV2::UServerV2(string u_serverIP, int u_serverPort, string t_serverIP, int
                     perror("ERROR IN PROTOCOL 6-STEP 2");
                     return;
                 }
-                vector<size_t> cluster_members;
+                vector<uint32_t > cluster_members;
                 for (auto &iter:this->A) {
                     if (iter.second[i] == 1) {
-                        cluster_members.push_back(this->cipherIDs[iter.first]);
+                        cluster_members.push_back(iter.first);
                     }
                 }
-                Ciphertext total;
-                total = this->cipherpoints[cluster_members[0]];
-                for (unsigned j = 1; j < cluster_members.size(); j++) {
-                    total += this->cipherpoints[cluster_members[j]];
+                vector<Ciphertext> centroid;
+                for(unsigned j=0;j<this->dim;j++){
+                    uint32_t coef_index = j;
+                    if (0 > send(this->t_serverSocket, &coef_index, sizeof(uint32_t), 0)) {
+                        perror("SEND COEF INDEX FAILED.");
+                        return;
+                    }
+                    string message5 = this->receiveMessage(this->t_serverSocket, 16);
+                    if (message5 != "T-INDEX-RECEIVED") {
+                        perror("ERROR IN PROTOCOL 6-STEP 3");
+                        return;
+                    }
+                    Ciphertext total_of_coef;
+                    total_of_coef = this->cipherpoints[cluster_members[0]][j];
+                    for (unsigned f = 1; f < cluster_members.size(); f++) {
+                        total_of_coef += this->cipherpoints[cluster_members[f]][j];
+                    }
+                    this->sendStream(this->centroidsCoefToStream(total_of_coef), this->t_serverSocket);
+                    string message6 = this->receiveMessage(this->t_serverSocket, 15);
+                    if (message5 != "T-COEF-RECEIVED") {
+                        perror("ERROR IN PROTOCOL 6-STEP 3");
+                        return;
+                    }
+                    this->sendMessage(this->t_serverSocket,"U-R-C");
+                    Ciphertext centroid_coef(*this->client_pubkey);
+                    this->receiveStream(this->t_serverSocket, to_string(i) + "-centroid.dat");
+                    ifstream in(to_string(i) + "-centroid.dat");
+                    Import(in, centroid_coef);
+                    centroid.push_back(centroid_coef);
+                    this->sendMessage(this->t_serverSocket,"U-R-COEF");
                 }
-                this->sendStream(this->centroidsToStream(total), this->t_serverSocket);
-                string message5 = this->receiveMessage(this->t_serverSocket, 12);
-                if (message5 != "T-RECEIVED-C") {
-                    perror("ERROR IN PROTOCOL 6-STEP 3");
-                    return;
-                }
-                Ciphertext centroid(*this->client_pubkey);
-                ifstream cipherCentroid = this->receiveStream(this->t_serverSocket, to_string(index) + "-centroid.dat");
-                std::string buffer((std::istreambuf_iterator<char>(cipherCentroid)), std::istreambuf_iterator<char>());
-                hash<string> str_hash;
-                size_t hash_value = str_hash(buffer);
-                ifstream in(to_string(index) + "-centroid.dat");
-                Import(in, centroid);
-                this->rev_centroids_clusters[i] = hash_value;
-                this->centroids_clusters[hash_value] = i;
-                this->centroids[hash_value] = centroid;
+                srand(static_cast<unsigned int>(time(NULL)));
+                uint32_t identifier;
+                identifier = static_cast<uint32_t>(rand());
+                this->rev_centroids_clusters[i] = identifier;
+                this->centroids_clusters[identifier] = i;
+                this->centroids[identifier] = centroid;
                 this->sendMessage(this->t_serverSocket, "U-NC-RECEIVED");
             }
             this->sendMessage(this->t_serverSocket, "U-C-UPDATED");
@@ -350,39 +360,67 @@ void UServerV2::receiveEncryptionParamFromClient(int socketFD) {
 }
 
 void UServerV2::receiveEncryptedData(int socketFD) {
-    bool flag = true;
-    this->sendMessage(socketFD, "U-DATA-READY");
-    string message = this->receiveMessage(socketFD, 8);
+    this->sendMessage(socketFD,"U-DATA-READY");
+    uint32_t dimension;
+    auto *data1 = (char *) &dimension;
+    if (recv(socketFD, data1, sizeof(uint32_t), 0) < 0) {
+        perror("RECEIVE CLUSTER INDEX ERROR. ERROR IN PROTOCOL 3.1-STEP 2");
+    }
+    ntohl(dimension);
+    this->log(socketFD, "--> Data dimension: " + to_string(dimension));
+    this->dim=dimension;
+    this->sendMessage(socketFD,"U-D-RECEIVED");
+    uint32_t numberofpoints;
+    auto *data2 = (char *) &numberofpoints;
+    if (recv(socketFD, data2, sizeof(uint32_t), 0) < 0) {
+        perror("RECEIVE CLUSTER INDEX ERROR. ERROR IN PROTOCOL 3.1-STEP 3");
+    }
+    ntohl(numberofpoints);
+    this->log(socketFD, "--> Number of Points: " + to_string(numberofpoints));
+    this->number_of_points=numberofpoints;
+    this->sendMessage(socketFD,"U-N-RECEIVED");
+    string message = this->receiveMessage(socketFD,8);
     if (message != "C-DATA-P") {
-        perror("ERROR IN PROTOCOL 3-STEP 2");
+        perror("ERROR IN PROTOCOL 3.1-STEP 4");
         return;
     }
-    int i = 0;
-    while (flag) {
-        this->sendMessage(socketFD, "U-DATA-P-READY");
-        string filename = "point_" + to_string(i) + ".dat";
-        ifstream cipher = this->receiveStream(socketFD, filename);
-        std::string buffer((std::istreambuf_iterator<char>(cipher)), std::istreambuf_iterator<char>());
-        hash<string> str_hash;
-        size_t hash_value = str_hash(buffer);
-        bitset<6> cluster;
-        this->A[hash_value] = cluster;
-        this->A_r[hash_value] = cluster;
-        this->cipherMAP[hash_value] = filename;
-        this->cipherIDs[hash_value] = hash_value;
-        this->sendMessage(socketFD, "U-DATA-P-RECEIVED");
-        string message1 = this->receiveMessage(socketFD, 8);
-        if (message1 == "C-DATA-P") {
-            flag = true;
-        } else if (message1 == "C-DATA-E") {
-            flag = false;
-        } else {
-            perror("ERROR IN PROTOCOL 3-STEP 3");
-            return;
+    this->sendMessage(socketFD,"U-DATA-P-READY");
+    for(unsigned i=0; i<this->number_of_points;i++){
+        uint32_t identifier;
+        auto *data = (char *) &identifier;
+        if (recv(socketFD, data, sizeof(uint32_t), 0) < 0) {
+            perror("RECEIVE CLUSTER INDEX ERROR. ERROR IN PROTOCOL 3.1-STEP 5");
         }
-        i++;
+        ntohl(identifier);
+        this->sendMessage(socketFD,"U-P-I-RECEIVED");
+        vector<Ciphertext> encrypted_point;
+        for(unsigned j=0; j<this->dim;j++){
+            uint32_t index;
+            auto *data3 = (char *) &index;
+            if (recv(socketFD, data3, sizeof(uint32_t), 0) < 0) {
+                perror("RECEIVE CLUSTER INDEX ERROR. ERROR IN PROTOCOL 3.1-STEP 6");
+            }
+            ntohl(index);
+            this->sendMessage(socketFD,"U-INDEX-RECEIVED");
+            string filename = "coef_" + to_string(j) + ".dat";
+            ifstream cipher = this->receiveStream(socketFD, filename);
+            Ciphertext ciphertext(*this->client_pubkey);
+            ifstream in(filename);
+            Import(in, ciphertext);
+            encrypted_point.push_back(ciphertext);
+            this->sendMessage(socketFD,"U-COEF-RECEIVED");
+        }
+        this->cipherpoints[identifier]=encrypted_point;
     }
-    this->sendMessage(socketFD, "U-DATA-RECEIVED");
+
+    string message1 = this->receiveMessage(socketFD,8);
+    if (message1 != "C-DATA-E") {
+        perror("ERROR IN PROTOCOL 3.1-STEP 7");
+        return;
+    }
+    this->sendMessage(socketFD,"U-DATA-RECEIVED");
+    print("PROTOCOL 3 COMPLETED");
+
     print("DATA RECEIVED - STARTING K-MEANS");
 }
 
@@ -481,12 +519,22 @@ void UServerV2::initializeKMToTServer() {
         perror("ERROR IN PROTOCOL 4-STEP 2");
         return;
     }
+    uint32_t data_dimension = this->dim;
+    if (0 > send(this->t_serverSocket, &data_dimension, sizeof(uint32_t), 0)) {
+        perror("SEND DIMENSION FAILED.");
+        return;
+    }
+    string message2 = this->receiveMessage(this->t_serverSocket, 14);
+    if (message2 != "T-DIM-RECEIVED") {
+        perror("ERROR IN PROTOCOL 4-STEP 3");
+        return;
+    }
     close(this->t_serverSocket);
     this->t_serverSocket = -1;
 
 }
 
-ifstream UServerV2::centroidsToStream(const Ciphertext &centroid) {
+ifstream UServerV2::centroidsCoefToStream(const Ciphertext &centroid) {
     ofstream ofstream1("centroid.dat");
     Export(ofstream1, centroid);
     return ifstream("centroid.dat");
@@ -505,18 +553,19 @@ void UServerV2::endKMToTserver() {
 void UServerV2::resultsToKClient() {
     this->sendMessage(this->clientSocket, "U-RESULT");
     string message = this->receiveMessage(this->clientSocket, 7);
-    if (message != "K-READY") {
+    if (message != "C-READY") {
         perror("ERROR IN PROTOCOL 8-STEP 1");
         return;
     }
     for (auto &iter:this->A) {
         this->sendMessage(this->clientSocket, "U-P");
         string message1 = this->receiveMessage(this->clientSocket, 5);
-        if (message1 != "U-P-R") {
+        if (message1 != "C-P-R") {
             perror("ERROR IN PROTOCOL 8-STEP 2");
             return;
         }
         auto identity =(uint32_t) iter.first;
+        htonl(identity);
         if (0 > send(this->clientSocket, &identity, sizeof(uint32_t), 0)) {
             perror("SEND IDENTITY FAILED.");
             return;
@@ -532,6 +581,7 @@ void UServerV2::resultsToKClient() {
                 index = i;
             }
         }
+        htonl(index);
         if (0 > send(this->clientSocket, &index, sizeof(uint32_t), 0)) {
             perror("SEND CLUSTER INDEX FAILED.");
             return;
@@ -544,9 +594,10 @@ void UServerV2::resultsToKClient() {
     }
     this->sendMessage(this->clientSocket, "U-RESULT-E");
     string message4 = this->receiveMessage(this->clientSocket, 5);
-    if (message4 != "K-END") {
+    if (message4 != "C-END") {
         perror("ERROR IN PROTOCOL 8-STEP 3");
         return;
     }
+
 
 }

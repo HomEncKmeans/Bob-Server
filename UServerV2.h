@@ -25,17 +25,18 @@ class UServerV2 {
 private:
     // K-means
     unsigned k;
-    map<size_t ,bitset<6>> A;
-    map<size_t ,bitset<6>> A_r;
-    map<size_t ,string> cipherMAP;
-    map<size_t ,Ciphertext> cipherpoints;
-    map<size_t,Ciphertext> centroids;
-    map<size_t,int> centroids_clusters;
-    map<int,size_t> rev_centroids_clusters;
-    map<size_t,size_t> cipherIDs;
+    map<uint32_t ,bitset<6>> A;
+    map<uint32_t ,bitset<6>> A_r;
+    map<uint32_t ,string> cipherMAP;
+    map<uint32_t ,vector<Ciphertext>> cipherpoints;
+    map<uint32_t,vector<Ciphertext>> centroids;
+    map<uint32_t,int> centroids_clusters;
+    map<int,uint32_t> rev_centroids_clusters;
+    map<uint32_t,uint32_t> cipherIDs;
     int max_round;
     int variance_bound;
-
+    unsigned dim;
+    unsigned number_of_points;
     // Networking
     string u_serverIP;
     int u_serverPort;
@@ -65,7 +66,7 @@ private:
     void swapA();
     void initializeKMToTServer();
     void endKMToTserver();
-    ifstream centroidsToStream(const Ciphertext &);
+    ifstream centroidsCoefToStream(const Ciphertext &);
     void resultsToKClient();
 
 public:
