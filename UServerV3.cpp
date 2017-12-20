@@ -188,6 +188,7 @@ UServerV3::UServerV3(string u_serverIP, int u_serverPort, string t_serverIP, int
 
     }
     this->endKMToTserver();
+    print("UServer send Results to KClient");
     this->resultsToKClient();
     print("END-OF-KMEANS");
     //this->socketAccept();
@@ -461,7 +462,6 @@ void UServerV3::initializeClustersandCentroids() {
     this->client_pubkey->Encrypt(clusterIndCipher, clusterInd);
     vector<unsigned> check;
     bool flag = true;
-
     for (auto &iter : this->A) {
         seed = distribution(generator);
         iter.second[seed] = clusterIndCipher;
