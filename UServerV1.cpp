@@ -169,19 +169,33 @@ ifstream UServerV1::receiveStream(int socketFD, string filename) {
     if (recv(socketFD, data, sizeof(uint32_t), 0) < 0) {
         perror("RECEIVE SIZE ERROR");
     }
+
+
     ntohl(size);
     this->log(socketFD, "--> SIZE: " + to_string(size));
     this->sendMessage(socketFD, "SIZE-OK");
-    char buffer[size];
-    ssize_t r = recv(socketFD, buffer, size, 0);
-    print(r);
-    if (r < 0) {
-        perror("RECEIVE STREAM ERROR");
-    }
-    ofstream temp(filename, ios::out | ios::binary);
-    temp.write(buffer, size);
-    temp.close();
 
+    auto *memblock = new char[size];
+    ssize_t expected_data=size;
+    ssize_t received_data=0;
+    while(received_data<expected_data){
+        ssize_t data_fd=recv(socketFD, memblock+received_data, 1000, 0);
+        received_data +=data_fd;
+
+
+
+    }
+    print(received_data);
+
+    if (received_data!=expected_data ) {
+        perror("RECEIVE STREAM ERROR");
+        exit(1);
+    }
+
+    ofstream temp(filename, ios::out | ios::binary);
+
+    temp.write(memblock, size);
+    temp.close();
     return ifstream(filename);
 }
 
