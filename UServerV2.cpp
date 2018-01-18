@@ -268,14 +268,16 @@ void UServerV2::handleRequest(int socketFD) {
 }
 
 bool UServerV2::sendStream(ifstream data, int socket) {
+    uint32_t CHUNK_SIZE = 10000;
     streampos begin, end;
     begin = data.tellg();
     data.seekg(0, ios::end);
     end = data.tellg();
     streampos size = end - begin;
-    uint32_t sizek = size;
-    auto *memblock = new char[sizek];
+    uint32_t sizek;
+    sizek = static_cast<uint32_t>(size);
     data.seekg(0, std::ios::beg);
+    auto *memblock = new char[sizek];
     data.read(memblock, sizek);
     data.close();
     htonl(sizek);
@@ -285,14 +287,36 @@ bool UServerV2::sendStream(ifstream data, int socket) {
     } else {
         this->log(socket, "<--- " + to_string(sizek));
         if (this->receiveMessage(socket, 7) == "SIZE-OK") {
-            ssize_t r = (send(socket, memblock, static_cast<size_t>(size), 0));
-            print(r); //for debugging
-            if (r < 0) {
-                perror("SEND FAILED.");
-                return false;
-            } else {
-                return true;
+            auto *buffer = new char[CHUNK_SIZE];
+            uint32_t beginmem = 0;
+            uint32_t endmem = 0;
+            uint32_t num_of_blocks = sizek / CHUNK_SIZE;
+            uint32_t rounds = 0;
+            while (rounds <= num_of_blocks) {
+                if (rounds == num_of_blocks) {
+                    uint32_t rest = sizek - (num_of_blocks) * CHUNK_SIZE;
+                    endmem += rest;
+                    copy(memblock + beginmem, memblock + endmem, buffer);
+                    ssize_t r = (send(socket, buffer, rest, 0));
+                    rounds++;
+                    if (r < 0) {
+                        perror("SEND FAILED.");
+                        return false;
+                    }
+                } else {
+                    endmem += CHUNK_SIZE;
+                    copy(memblock + beginmem, memblock + endmem, buffer);
+                    beginmem = endmem;
+                    ssize_t r = (send(socket, buffer, 10000, 0));
+                    rounds++;
+                    if (r < 0) {
+                        perror("SEND FAILED.");
+                        return false;
+                    }
+                }
             }
+            return true;
+
         } else {
             perror("SEND SIZE ERROR");
             return false;
@@ -328,19 +352,29 @@ ifstream UServerV2::receiveStream(int socketFD, string filename) {
     if (recv(socketFD, data, sizeof(uint32_t), 0) < 0) {
         perror("RECEIVE SIZE ERROR");
     }
+
     ntohl(size);
     this->log(socketFD, "--> SIZE: " + to_string(size));
     this->sendMessage(socketFD, "SIZE-OK");
-    char buffer[size];
-    ssize_t r = recv(socketFD, buffer, size, 0);
-    print(r);
-    if (r < 0) {
-        perror("RECEIVE STREAM ERROR");
-    }
-    ofstream temp(filename, ios::out | ios::binary);
-    temp.write(buffer, size);
-    temp.close();
 
+    auto *memblock = new char[size];
+    ssize_t expected_data=size;
+    ssize_t received_data=0;
+    while(received_data<expected_data){
+        ssize_t data_fd=recv(socketFD, memblock+received_data, 10000, 0);
+        received_data +=data_fd;
+
+    }
+    print(received_data);
+
+    if (received_data!=expected_data ) {
+        perror("RECEIVE STREAM ERROR");
+        exit(1);
+    }
+
+    ofstream temp(filename, ios::out | ios::binary);
+    temp.write(memblock, size);
+    temp.close();
     return ifstream(filename);
 }
 

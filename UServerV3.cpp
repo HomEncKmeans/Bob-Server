@@ -257,14 +257,16 @@ void UServerV3::handleRequest(int socketFD) {
 }
 
 bool UServerV3::sendStream(ifstream data, int socket) {
+    uint32_t CHUNK_SIZE = 10000;
     streampos begin, end;
     begin = data.tellg();
     data.seekg(0, ios::end);
     end = data.tellg();
     streampos size = end - begin;
-    uint32_t sizek = size;
-    auto *memblock = new char[sizek];
+    uint32_t sizek;
+    sizek = static_cast<uint32_t>(size);
     data.seekg(0, std::ios::beg);
+    auto *memblock = new char[sizek];
     data.read(memblock, sizek);
     data.close();
     htonl(sizek);
@@ -274,14 +276,36 @@ bool UServerV3::sendStream(ifstream data, int socket) {
     } else {
         this->log(socket, "<--- " + to_string(sizek));
         if (this->receiveMessage(socket, 7) == "SIZE-OK") {
-            ssize_t r = (send(socket, memblock, static_cast<size_t>(size), 0));
-            print(r); //for debugging
-            if (r < 0) {
-                perror("SEND FAILED.");
-                return false;
-            } else {
-                return true;
+            auto *buffer = new char[CHUNK_SIZE];
+            uint32_t beginmem = 0;
+            uint32_t endmem = 0;
+            uint32_t num_of_blocks = sizek / CHUNK_SIZE;
+            uint32_t rounds = 0;
+            while (rounds <= num_of_blocks) {
+                if (rounds == num_of_blocks) {
+                    uint32_t rest = sizek - (num_of_blocks) * CHUNK_SIZE;
+                    endmem += rest;
+                    copy(memblock + beginmem, memblock + endmem, buffer);
+                    ssize_t r = (send(socket, buffer, rest, 0));
+                    rounds++;
+                    if (r < 0) {
+                        perror("SEND FAILED.");
+                        return false;
+                    }
+                } else {
+                    endmem += CHUNK_SIZE;
+                    copy(memblock + beginmem, memblock + endmem, buffer);
+                    beginmem = endmem;
+                    ssize_t r = (send(socket, buffer, 10000, 0));
+                    rounds++;
+                    if (r < 0) {
+                        perror("SEND FAILED.");
+                        return false;
+                    }
+                }
             }
+            return true;
+
         } else {
             perror("SEND SIZE ERROR");
             return false;
@@ -317,19 +341,29 @@ ifstream UServerV3::receiveStream(int socketFD, string filename) {
     if (recv(socketFD, data, sizeof(uint32_t), 0) < 0) {
         perror("RECEIVE SIZE ERROR");
     }
+
     ntohl(size);
     this->log(socketFD, "--> SIZE: " + to_string(size));
     this->sendMessage(socketFD, "SIZE-OK");
-    char buffer[size];
-    ssize_t r = recv(socketFD, buffer, size, 0);
-    print(r);
-    if (r < 0) {
-        perror("RECEIVE STREAM ERROR");
-    }
-    ofstream temp(filename, ios::out | ios::binary);
-    temp.write(buffer, size);
-    temp.close();
 
+    auto *memblock = new char[size];
+    ssize_t expected_data=size;
+    ssize_t received_data=0;
+    while(received_data<expected_data){
+        ssize_t data_fd=recv(socketFD, memblock+received_data, 10000, 0);
+        received_data +=data_fd;
+
+    }
+    print(received_data);
+
+    if (received_data!=expected_data ) {
+        perror("RECEIVE STREAM ERROR");
+        exit(1);
+    }
+
+    ofstream temp(filename, ios::out | ios::binary);
+    temp.write(memblock, size);
+    temp.close();
     return ifstream(filename);
 }
 
@@ -496,36 +530,52 @@ long UServerV3::calculateVariance() {
     bool flag = true;
     for (auto &iter:this->A) {
         if (flag) {
+            Ciphertext rowsum;
             Ciphertext semi0;
+            Ciphertext semi1;
             semi0 = iter.second[0];
-            semi0 *= this->A_r[iter.first][0];
-            semi0.ScaleDown();
-            this->client_SM->ApplyKeySwitch(semi0);
             for (unsigned i = 1; i < iter.second.size(); i++) {
-                Ciphertext semi1;
-                semi1 = iter.second[i];
-                semi1 *= this->A_r[iter.first][i];
-                semi1.ScaleDown();
-                this->client_SM->ApplyKeySwitch(semi1);
-                semi0 += semi1;
+                Ciphertext sum1;
+                sum1 = iter.second[i];
+                sum1 *= (i+1);
+                semi0 += sum1;
             }
-            variance = semi0;
+
+            semi1 = this->A_r[iter.first][0];
+            for (unsigned i = 1; i < iter.second.size(); i++) {
+                Ciphertext sum2;
+                sum2 = this->A_r[iter.first][i];
+                sum2 *= (i+1);
+                semi1 += sum2;
+            }
+            rowsum=semi1;
+            rowsum*=-1;
+            rowsum+=semi0;
+            variance = rowsum;
             flag = false;
         } else {
+            Ciphertext rowsum;
             Ciphertext semi0;
+            Ciphertext semi1;
             semi0 = iter.second[0];
-            semi0 *= this->A_r[iter.first][0];
-            semi0.ScaleDown();
-            this->client_SM->ApplyKeySwitch(semi0);
             for (unsigned i = 1; i < iter.second.size(); i++) {
-                Ciphertext semi1;
-                semi1 = iter.second[i];
-                semi1 *= this->A_r[iter.first][i];
-                semi1.ScaleDown();
-                this->client_SM->ApplyKeySwitch(semi1);
-                semi0 += semi1;
+                Ciphertext sum1;
+                sum1 = iter.second[i];
+                sum1 *= (i+1);
+                semi0 += sum1;
             }
-            variance += semi0;
+
+            semi1 = this->A_r[iter.first][0];
+            for (unsigned i = 1; i < iter.second.size(); i++) {
+                Ciphertext sum2;
+                sum2 = this->A_r[iter.first][i];
+                sum2 *= (i+1);
+                semi1 += sum2;
+            }
+            rowsum=semi1;
+            rowsum*=-1;
+            rowsum+=semi0;
+            variance += rowsum;
         }
     }
     this->connectToTServer();
