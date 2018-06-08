@@ -130,6 +130,7 @@ UServer::UServer(string u_serverIP, int u_serverPort, string t_serverIP, int t_s
                         cluster_members.push_back(this->cipherIDs[iter.first]);
                     }
                 }
+                print("Members of Cluster: "+to_string(cluster_members.size()));
                 Ciphertext total;
                 total = this->cipherpoints[cluster_members[0]];
                 for (unsigned j = 1; j < cluster_members.size(); j++) {
