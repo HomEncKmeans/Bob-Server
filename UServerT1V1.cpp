@@ -94,6 +94,7 @@ UServerT1V1::UServerT1V1(string u_serverIP, int u_serverPort, string t_serverIP,
             ntohl(index);
             this->log(this->t_serverSocket, "--> INDEX: " + to_string(index));
             iter.second[index] = 1;
+            this->clusters_counter[index]+=1;
             this->sendMessage(this->t_serverSocket, "U-RECEIVED-I");
             close(this->t_serverSocket);
             this->t_serverSocket = -1;
@@ -103,11 +104,11 @@ UServerT1V1::UServerT1V1(string u_serverIP, int u_serverPort, string t_serverIP,
         print(r);
         this->swapA();
         if (r < this->max_round && s >= this->variance_bound) {
-            this->connectToTServer();
+            //this->connectToTServer();
             print("CREATE NEW CENTROIDS");
-            this->sendMessage(this->t_serverSocket, "U-NC");
-            string message3 = this->receiveMessage(this->t_serverSocket, 10);
-            if (message3 != "T-NC-READY") {
+            this->sendMessage(this->clientSocket, "U-NC");
+            string message3 = this->receiveMessage(this->clientSocket, 10);
+            if (message3 != "C-NC-READY") {
                 perror("ERROR IN PROTOCOL 6-STEP 1");
                 return;
             }
@@ -115,13 +116,23 @@ UServerT1V1::UServerT1V1(string u_serverIP, int u_serverPort, string t_serverIP,
             this->centroids.clear();
             for (unsigned i = 0; i < this->k; i++) {
                 uint32_t index = i;
-                if (0 > send(this->t_serverSocket, &index, sizeof(uint32_t), 0)) {
+                if (0 > send(this->clientSocket, &index, sizeof(uint32_t), 0)) {
                     perror("SEND INDEX FAILED.");
                     return;
                 }
-                string message4 = this->receiveMessage(this->t_serverSocket, 13);
-                if (message4 != "T-RECEIVED-CI") {
+                string message4 = this->receiveMessage(this->clientSocket, 13);
+                if (message4 != "C-RECEIVED-CI") {
                     perror("ERROR IN PROTOCOL 6-STEP 2");
+                    return;
+                }
+                uint32_t cluster_size = static_cast<uint32_t>(this->clusters_counter[i]);
+                if (0 > send(this->clientSocket, &cluster_size, sizeof(uint32_t), 0)) {
+                    perror("SEND INDEX FAILED.");
+                    return;
+                }
+                string message5 = this->receiveMessage(this->clientSocket, 13);
+                if (message5 != "C-RECEIVED-CS") {
+                    perror("ERROR IN PROTOCOL 6-STEP 3");
                     return;
                 }
                 vector<size_t> cluster_members;
@@ -136,14 +147,14 @@ UServerT1V1::UServerT1V1(string u_serverIP, int u_serverPort, string t_serverIP,
                 for (unsigned j = 1; j < cluster_members.size(); j++) {
                     total += this->cipherpoints[cluster_members[j]];
                 }
-                this->sendStream(this->centroidsToStream(total), this->t_serverSocket);
-                string message5 = this->receiveMessage(this->t_serverSocket, 12);
-                if (message5 != "T-RECEIVED-C") {
-                    perror("ERROR IN PROTOCOL 6-STEP 3");
+                this->sendStream(this->centroidsToStream(total), this->clientSocket);
+                string message6 = this->receiveMessage(this->clientSocket, 12);
+                if (message6 != "C-RECEIVED-C") {
+                    perror("ERROR IN PROTOCOL 6-STEP 4");
                     return;
                 }
                 Ciphertext centroid(*this->client_pubkey);
-                ifstream cipherCentroid = this->receiveStream(this->t_serverSocket, to_string(index) + "-centroid.dat");
+                ifstream cipherCentroid = this->receiveStream(this->clientSocket, to_string(index) + "-centroid.dat");
                 std::string buffer((std::istreambuf_iterator<char>(cipherCentroid)), std::istreambuf_iterator<char>());
                 hash<string> str_hash;
                 size_t hash_value = str_hash(buffer);
@@ -152,16 +163,19 @@ UServerT1V1::UServerT1V1(string u_serverIP, int u_serverPort, string t_serverIP,
                 this->rev_centroids_clusters[i] = hash_value;
                 this->centroids_clusters[hash_value] = i;
                 this->centroids[hash_value] = centroid;
-                this->sendMessage(this->t_serverSocket, "U-NC-RECEIVED");
+                this->sendMessage(this->clientSocket, "U-NC-RECEIVED");
             }
-            this->sendMessage(this->t_serverSocket, "U-C-UPDATED");
-            string message6 = this->receiveMessage(this->t_serverSocket, 7);
-            if (message6 != "T-READY") {
+            this->sendMessage(this->clientSocket, "U-C-UPDATED");
+            string message7 = this->receiveMessage(this->clientSocket, 7);
+            if (message7 != "C-READY") {
                 perror("ERROR IN PROTOCOL 6-STEP 4");
                 return;
             }
-            close(this->t_serverSocket);
-            this->t_serverSocket = -1;
+            for(auto &iter:this->clusters_counter){
+                iter.second=0;
+            }
+            //close(this->clientSocket);
+            //this->t_serverSocket = -1;
         }
 
     }

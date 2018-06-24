@@ -35,6 +35,7 @@ private:
     map<size_t,size_t> cipherIDs;
     int max_round;
     int variance_bound;
+    map<unsigned,long> clusters_counter;
 
     // Networking
     string u_serverIP;
