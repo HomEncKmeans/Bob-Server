@@ -21,12 +21,12 @@
 #include "unistd.h"
 
 using namespace std;
-class UServerT1V3 {
+class UServerT2V3 {
 private:
     // K-means
     unsigned k;
-    map<uint32_t ,bitset<6>> A;
-    map<uint32_t ,bitset<6>> A_r;
+    map<uint32_t ,vector<Ciphertext>> A;
+    map<uint32_t ,vector<Ciphertext>> A_r;
     map<uint32_t ,string> cipherMAP;
     map<uint32_t ,vector<Ciphertext>> cipherpoints;
     map<uint32_t,vector<Ciphertext>> centroids;
@@ -45,7 +45,6 @@ private:
     int t_serverPort;
     int t_serverSocket;
     int clientSocket;
-    map<unsigned,long> clusters_counter;
 
     // Cryptography
     FHEcontext *client_context;
@@ -61,17 +60,19 @@ private:
     void receiveEncryptedData(int);
     void connectToTServer();
     ifstream distanceToStream(const Ciphertext &);
-    void initializeClusters();
-    void initializeCentroids();
+    void initializeClustersandCentroids();
     long calculateVariance();
     void swapA();
     void initializeKMToTServer();
     void endKMToTserver();
     ifstream centroidsCoefToStream(const Ciphertext &);
+    ifstream varianceToStream(const Ciphertext &);
+    ifstream resultToStream(const Ciphertext &);
+
     void resultsToKClient();
 
 public:
-    UServerT1V3(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
+    UServerT2V3(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
     bool sendStream(ifstream,int);
     bool sendMessage(int,string);
     string receiveMessage(int, int buffersize=64);
@@ -84,4 +85,4 @@ public:
 };
 
 
-#endif //UServerT1V3_UServerT1V3_H
+#endif
