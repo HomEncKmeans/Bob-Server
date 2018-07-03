@@ -71,12 +71,30 @@ UServerT1V2::UServerT1V2(string u_serverIP, int u_serverPort, string t_serverIP,
                     perror("ERROR IN PROTOCOL 5-STEP 2");
                     return;
                 }
-                Ciphertext distance;
+                vector<Ciphertext> distance;
                 print(iter.first);
                 print(this->rev_centroids_clusters[i]);
-                distance = euclideanDistance(this->cipherpoints[iter.first],
-                                             this->centroids[this->rev_centroids_clusters[i]], *this->client_SM);
-                this->sendStream(this->distanceToStream(distance), this->t_serverSocket);
+                distance=FHE_HM1(this->cipherpoints[iter.first],this->centroids[this->rev_centroids_clusters[i]]);
+                auto point_size = static_cast<uint32_t>(distance.size());
+                if (0 > send(this->t_serverSocket, &point_size, sizeof(uint32_t), 0)) {
+                    perror("SEND POINT SIZE FAILED.");
+                    return;
+                }
+                string message11 = this->receiveMessage(this->t_serverSocket,8);
+                if (message11 != "T-R-SIZE") {
+                    perror("ERROR IN PROTOCOL 5-STEP 2-1");
+                    return;
+                }
+
+                for (const auto &coef : distance) {
+                    this->sendStream(this->distanceToStream(coef), this->t_serverSocket);
+                    string message22 = this->receiveMessage(this->t_serverSocket, 8);
+                    if (message22 != "T-COEF-R") {
+                        perror("ERROR IN PROTOCOL 5-STEP 2-2");
+                        return;
+                    }
+                }
+
                 string message2 = this->receiveMessage(this->t_serverSocket, 12);
                 if (message2 != "T-D-RECEIVED") {
                     perror("ERROR IN PROTOCOL 5-STEP 3");
