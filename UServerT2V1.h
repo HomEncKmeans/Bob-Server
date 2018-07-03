@@ -28,8 +28,8 @@ private:
     map<uint32_t ,vector<Ciphertext>> A;
     map<uint32_t ,vector<Ciphertext>> A_r;
     map<uint32_t ,string> cipherMAP;
-    map<uint32_t ,vector<Ciphertext>> cipherpoints;
-    map<uint32_t,vector<Ciphertext>> centroids;
+    map<uint32_t ,Ciphertext> cipherpoints;
+    map<uint32_t,Ciphertext> centroids;
     map<uint32_t,int> centroids_clusters;
     map<int,uint32_t> rev_centroids_clusters;
     map<uint32_t,uint32_t> cipherIDs;
@@ -65,7 +65,7 @@ private:
     void swapA();
     void initializeKMToTServer();
     void endKMToTserver();
-    ifstream centroidsCoefToStream(const Ciphertext &);
+    ifstream centroidToStream(const Ciphertext &);
     ifstream clusterSizeToStream(const Ciphertext &);
     ifstream resultToStream(const Ciphertext &);
 
