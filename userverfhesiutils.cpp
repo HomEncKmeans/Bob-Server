@@ -14,6 +14,16 @@ Ciphertext FHE_HM(Ciphertext &c1, Ciphertext &c2) {
     return distance;
 }
 
+vector<Ciphertext> FHE_HM1(vector<Ciphertext> &cpoint1, vector<Ciphertext> &cpoint2) {
+    vector<Ciphertext> distance;
+    unsigned long dimension=cpoint1.size();
+    for(unsigned i=0; i<dimension;i++){
+        distance.push_back(FHE_HM(cpoint1[i],cpoint2[i]));
+    }
+    return distance;
+}
+
+
 void timeCalulator(const clock_t &c_start, const chrono::high_resolution_clock::time_point &t_start) {
     std::clock_t c_end = std::clock();
     auto t_end = std::chrono::high_resolution_clock::now();

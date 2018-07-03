@@ -11,7 +11,7 @@
 #include <vector>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include "userverfhesiutils.h"
+#include "old_techniques/userverfhesiutils.h"
 #include <utility>
 #include <map>
 #include <bitset>
@@ -21,19 +21,18 @@
 #include "unistd.h"
 
 using namespace std;
-class UServerT2V3 {
+class UServerT1V2 {
 private:
     // K-means
     unsigned k;
-    map<uint32_t ,vector<Ciphertext>> A;
-    map<uint32_t ,vector<Ciphertext>> A_r;
+    map<uint32_t ,bitset<6>> A;
+    map<uint32_t ,bitset<6>> A_r;
     map<uint32_t ,string> cipherMAP;
     map<uint32_t ,vector<Ciphertext>> cipherpoints;
     map<uint32_t,vector<Ciphertext>> centroids;
     map<uint32_t,int> centroids_clusters;
     map<int,uint32_t> rev_centroids_clusters;
     map<uint32_t,uint32_t> cipherIDs;
-    map<uint32_t,Ciphertext> clusters_size;
     int max_round;
     int variance_bound;
     unsigned dim;
@@ -46,6 +45,7 @@ private:
     int t_serverPort;
     int t_serverSocket;
     int clientSocket;
+    map<unsigned,long> clusters_counter;
 
     // Cryptography
     FHEcontext *client_context;
@@ -61,18 +61,17 @@ private:
     void receiveEncryptedData(int);
     void connectToTServer();
     ifstream distanceToStream(const Ciphertext &);
-    void initializeClustersandCentroids();
+    void initializeClusters();
+    void initializeCentroids();
+    long calculateVariance();
     void swapA();
     void initializeKMToTServer();
     void endKMToTserver();
     ifstream centroidsCoefToStream(const Ciphertext &);
-    ifstream clusterSizeToStream(const Ciphertext &);
-    ifstream resultToStream(const Ciphertext &);
-
     void resultsToKClient();
 
 public:
-    UServerT2V3(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
+    UServerT1V2(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
     bool sendStream(ifstream,int);
     bool sendMessage(int,string);
     string receiveMessage(int, int buffersize=64);
@@ -85,4 +84,4 @@ public:
 };
 
 
-#endif
+#endif //UServerT1V2_UServerT1V2_H

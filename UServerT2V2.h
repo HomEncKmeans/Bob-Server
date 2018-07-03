@@ -11,7 +11,7 @@
 #include <vector>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include "userverfhesiutils.h"
+#include "old_techniques/userverfhesiutils.h"
 #include <utility>
 #include <map>
 #include <bitset>
@@ -21,7 +21,7 @@
 #include "unistd.h"
 
 using namespace std;
-class UServerT2V3 {
+class UServerT2V2 {
 private:
     // K-means
     unsigned k;
@@ -72,7 +72,7 @@ private:
     void resultsToKClient();
 
 public:
-    UServerT2V3(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
+    UServerT2V2(string,int,string,int,unsigned ,int max_round=5,int variance_bound=0);
     bool sendStream(ifstream,int);
     bool sendMessage(int,string);
     string receiveMessage(int, int buffersize=64);
