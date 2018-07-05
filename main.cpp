@@ -11,6 +11,12 @@
 #include <chrono>
 #include <iomanip>
 int main() {
+    string version="T2V3";
+    string dataset="1";
+    string unit="UServer";
+    double cpu_time;
+    double wall_clock;
+
     clock_t c_start = clock();
     auto t_start = chrono::high_resolution_clock::now();
 
@@ -24,11 +30,20 @@ int main() {
     std::clock_t c_end = std::clock();
     auto t_end = std::chrono::high_resolution_clock::now();
 
+    cpu_time=1000.0 * (c_end-c_start) / CLOCKS_PER_SEC;
+    wall_clock=chrono::duration<double, milli>(t_end-t_start).count();
     std::cout << fixed << setprecision(2) << "CPU time used: "
-              << 1000.0 * (c_end-c_start) / CLOCKS_PER_SEC << " ms\n"
+              << cpu_time << " ms\n"
               << "Wall clock time passed: "
-              << chrono::duration<double, milli>(t_end-t_start).count()
+              << wall_clock
               << " ms"<<endl;
+    string result= unit+","+version+","+dataset+","+to_string(cpu_time)+","+to_string(wall_clock)+"\n";
+    ofstream myfile;
+    myfile.open ("exp_"+unit+"_"+version+"_"+dataset+".csv");
+    myfile << result;
+    myfile.close();
+
+
     return 0;
 }
 

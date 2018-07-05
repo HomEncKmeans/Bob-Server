@@ -169,7 +169,7 @@ UServerT2V1::UServerT2V1(string u_serverIP, int u_serverPort, string t_serverIP,
                 this->receiveStream(this->clientSocket, to_string(i) + "-centroid.dat");
                 ifstream in(to_string(i) + "-centroid.dat");
                 Import(in, centroid_updated);
-                this->sendMessage(this->clientSocket, "U-R-COEF");
+                //this->sendMessage(this->clientSocket, "U-R-COEF");
                 srand(static_cast<unsigned int>(time(NULL)));
                 uint32_t identifier;
                 identifier = static_cast<uint32_t>(rand());
